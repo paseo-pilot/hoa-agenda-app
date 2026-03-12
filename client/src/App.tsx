@@ -104,7 +104,6 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [provisioningFolder, setProvisioningFolder] = useState(false);
   const [linkingDocument, setLinkingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [draft, setDraft] = useState<DraftItem>(emptyDraft);
@@ -219,26 +218,6 @@ function App() {
       setError((err as Error).message);
     } finally {
       setCreating(false);
-    }
-  };
-
-  const provisionFolder = async () => {
-    if (!selectedItem) return;
-    setProvisioningFolder(true);
-    try {
-      const res = await fetch(`${apiBase}/sharepoint/provision-folder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item_id: selectedItem.id, title: selectedItem.title }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to provision SharePoint folder');
-      setDocDraft((prev) => ({ ...prev, path: data.folderPath }));
-      setNotice(`Provisioned SharePoint folder for ${selectedItem.title}`);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setProvisioningFolder(false);
     }
   };
 
@@ -464,9 +443,6 @@ function App() {
             <div className="detail-block form-block">
               <div className="detail-header-row">
                 <div className="detail-label">Documents</div>
-                <button className="ghost-button" type="button" onClick={() => void provisionFolder()} disabled={provisioningFolder}>
-                  {provisioningFolder ? 'Provisioning…' : 'Provision SharePoint folder'}
-                </button>
               </div>
               <div className="document-list">
                 {(selectedItem.documents || []).length ? (
