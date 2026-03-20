@@ -81,6 +81,9 @@ h1, h2, h3 { margin: 0; }
 .ghost-button, .nav-button { background: rgba(255,255,255,0.03); color: var(--text); border: 1px solid var(--border); }
 .full-width { width: 100%; }
 .document-card:hover, .issue-card:hover { border-color: rgba(124,147,255,0.45); }
+.issue-card.dragging { opacity: 0.55; border-color: rgba(124,147,255,0.8); }
+.drag-handle-row { display: flex; align-items: center; gap: 8px; }
+.drag-grip { color: var(--muted); font-size: 14px; letter-spacing: -1px; }
 
 .desktop-only { display: none; }
 .mobile-only { display: block; }

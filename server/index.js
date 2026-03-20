@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS agenda_items (
   description TEXT,
   category TEXT,
   priority TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   kind TEXT NOT NULL,
   status TEXT NOT NULL,
   meeting_intent TEXT,
@@ -91,8 +92,27 @@ try {
 } catch (err) {
   // ignore if column already exists
 }
+try {
+  db.exec(`ALTER TABLE agenda_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
+} catch (err) {
+  // ignore if column already exists
+}
 
 const nowIso = () => new Date().toISOString();
+
+function normalizeSortOrder() {
+  const rows = db.prepare('SELECT id FROM agenda_items ORDER BY sort_order ASC, created_at ASC, id ASC').all();
+  const update = db.prepare('UPDATE agenda_items SET sort_order = ? WHERE id = ?');
+  const tx = db.transaction((items) => {
+    items.forEach((row, index) => update.run(index + 1, row.id));
+  });
+  tx(rows);
+}
+
+function nextSortOrder() {
+  const row = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM agenda_items').get();
+  return Number(row.max_sort || 0) + 1;
+}
 
 function seedMeetings() {
   const rows = [
@@ -119,10 +139,10 @@ function seedFromLegacyJson() {
   const raw = JSON.parse(fs.readFileSync(LEGACY_JSON_PATH, 'utf8'));
   const insertItem = db.prepare(`
     INSERT INTO agenda_items (
-      id, title, description, category, priority, kind, status, meeting_intent,
+      id, title, description, category, priority, sort_order, kind, status, meeting_intent,
       target_meeting_id, owner, decision_needed, next_action, notes_json, created_at, updated_at
     ) VALUES (
-      @id, @title, @description, @category, @priority, @kind, @status, @meeting_intent,
+      @id, @title, @description, @category, @priority, @sort_order, @kind, @status, @meeting_intent,
       @target_meeting_id, @owner, @decision_needed, @next_action, @notes_json, @created_at, @updated_at
     )
   `);
@@ -146,6 +166,7 @@ function seedFromLegacyJson() {
         description: item.description || null,
         category: item.category || null,
         priority: item.priority || null,
+        sort_order: nextSortOrder(),
         kind: item.kind || 'task',
         status: item.status || 'todo',
         meeting_intent: item.meetingIntent || null,
@@ -169,6 +190,7 @@ function seedFromLegacyJson() {
 
 seedMeetings();
 seedFromLegacyJson();
+normalizeSortOrder();
 
 function loadToken() {
   if (!fs.existsSync(TOKEN_PATH)) throw new Error(`Missing Graph token file at ${TOKEN_PATH}`);
@@ -379,10 +401,7 @@ function mountApi(prefix = '') {
       SELECT ai.*, m.title AS target_meeting_title, m.meeting_date AS target_meeting_date
       FROM agenda_items ai
       LEFT JOIN meetings m ON m.id = ai.target_meeting_id
-      ORDER BY
-        CASE ai.priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-        ai.updated_at DESC,
-        ai.title ASC
+      ORDER BY ai.sort_order ASC, ai.updated_at DESC, ai.title ASC
     `).all();
     res.json(rows.map((row) => ({ ...row, notes: JSON.parse(row.notes_json || '[]') })));
   });
@@ -399,15 +418,16 @@ function mountApi(prefix = '') {
     const createdAt = nowIso();
     db.prepare(`
       INSERT INTO agenda_items (
-        id, title, description, category, priority, kind, status, meeting_intent,
+        id, title, description, category, priority, sort_order, kind, status, meeting_intent,
         target_meeting_id, owner, decision_needed, next_action, notes_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       body.title,
       body.description || null,
       body.category || null,
       body.priority || 'medium',
+      body.sort_order || nextSortOrder(),
       body.kind || 'task',
       body.status || 'todo',
       body.meeting_intent || null,
@@ -436,7 +456,7 @@ function mountApi(prefix = '') {
 
     db.prepare(`
       UPDATE agenda_items SET
-        title = ?, description = ?, category = ?, priority = ?, kind = ?, status = ?,
+        title = ?, description = ?, category = ?, priority = ?, sort_order = ?, kind = ?, status = ?,
         meeting_intent = ?, target_meeting_id = ?, owner = ?, decision_needed = ?,
         next_action = ?, notes_json = ?, updated_at = ?
       WHERE id = ?
@@ -445,6 +465,7 @@ function mountApi(prefix = '') {
       updated.description || null,
       updated.category || null,
       updated.priority || null,
+      updated.sort_order || existing.sort_order || nextSortOrder(),
       updated.kind,
       updated.status,
       updated.meeting_intent || null,
@@ -465,6 +486,19 @@ function mountApi(prefix = '') {
     );
 
     res.json(getItem(req.params.id));
+  });
+
+  app.post(`${prefix}/api/items/reorder`, (req, res) => {
+    const body = req.body || {};
+    const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter(Boolean) : [];
+    if (!itemIds.length) return res.status(400).json({ error: 'itemIds is required' });
+    const update = db.prepare('UPDATE agenda_items SET sort_order = ?, updated_at = ? WHERE id = ?');
+    const timestamp = nowIso();
+    const tx = db.transaction((ids) => {
+      ids.forEach((id, index) => update.run(index + 1, timestamp, id));
+    });
+    tx(itemIds);
+    res.json({ ok: true, itemIds });
   });
 
   app.get(`${prefix}/api/documents`, (req, res) => {

@@ -27,6 +27,7 @@ type AgendaItem = {
   description?: string | null;
   category?: string | null;
   priority?: string | null;
+  sort_order?: number;
   kind: string;
   status: string;
   meeting_intent?: string | null;
@@ -109,6 +110,7 @@ function App() {
   const [linkingDocument, setLinkingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('board');
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftItem>(emptyDraft);
   const [docDraft, setDocDraft] = useState({ title: '', webUrl: '', path: '', notes: '' });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -283,6 +285,38 @@ function App() {
     }
   };
 
+  const reorderItems = async (laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed', draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return;
+    const laneItems = [...grouped[laneKey]];
+    const fromIndex = laneItems.findIndex((item) => item.id === draggedId);
+    const toIndex = laneItems.findIndex((item) => item.id === targetId);
+    if (fromIndex === -1 || toIndex === -1) return;
+    const [moved] = laneItems.splice(fromIndex, 1);
+    laneItems.splice(toIndex, 0, moved);
+
+    const laneIds = laneItems.map((item) => item.id);
+    const nextMeetingIds = laneKey === 'nextMeeting' ? laneIds : grouped.nextMeeting.map((item) => item.id);
+    const todoIds = laneKey === 'todos' ? laneIds : grouped.todos.map((item) => item.id);
+    const futureIds = laneKey === 'future' ? laneIds : grouped.future.map((item) => item.id);
+    const completedIds = laneKey === 'completed' ? laneIds : grouped.completed.map((item) => item.id);
+    const orderedIds = [...nextMeetingIds, ...todoIds, ...futureIds, ...completedIds];
+
+    const sortMap = new Map(orderedIds.map((id, index) => [id, index + 1]));
+    setItems((prev) => [...prev].sort((a, b) => (sortMap.get(a.id) || 999999) - (sortMap.get(b.id) || 999999)).map((item) => ({ ...item, sort_order: sortMap.get(item.id) || item.sort_order || 0 })));
+    try {
+      const res = await fetch(`${apiBase}/items/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ itemIds: orderedIds }),
+      });
+      if (!res.ok) throw new Error('Failed to reorder items');
+      setNotice(`Reordered ${laneKey}`);
+    } catch (err) {
+      setError((err as Error).message);
+      await loadData();
+    }
+  };
+
   const handleSelectItem = (id: string) => {
     setSelectedItemId(id);
     setMobileTab('item');
@@ -300,6 +334,9 @@ function App() {
           selectedItem={selectedItem}
           selectedItemId={selectedItemId}
           setSelectedItemId={setSelectedItemId}
+          draggedItemId={draggedItemId}
+          setDraggedItemId={setDraggedItemId}
+          reorderItems={reorderItems}
           stats={stats}
           error={error}
           notice={notice}
@@ -331,6 +368,9 @@ function App() {
           meetings={meetings}
           grouped={grouped}
           selectedItem={selectedItem}
+          draggedItemId={draggedItemId}
+          setDraggedItemId={setDraggedItemId}
+          reorderItems={reorderItems}
           stats={stats}
           error={error}
           notice={notice}
@@ -365,7 +405,7 @@ function App() {
 
 function DesktopShell(props: any) {
   const {
-    meetings, grouped, selectedItem, selectedItemId, setSelectedItemId, stats, error, notice,
+    meetings, grouped, selectedItem, selectedItemId, setSelectedItemId, draggedItemId, setDraggedItemId, reorderItems, stats, error, notice,
     loadData, saving, draft, setDraft, createItem, creating, updateSelectedItem,
     docDraft, setDocDraft, linkSharePointDocument, linkingDocument,
     uploadFile, setUploadFile, uploadTitle, setUploadTitle, uploadNotes, setUploadNotes,
@@ -392,10 +432,10 @@ function DesktopShell(props: any) {
         {error && <div className="error-banner">{error}</div>}
         {notice && <div className="notice-banner">{notice}</div>}
         <section className="lane-grid four-up">
-          <Lane title="Next meeting" items={grouped.nextMeeting} onSelect={setSelectedItemId} selectedItemId={selectedItemId} />
-          <Lane title="Board to-dos" items={grouped.todos} onSelect={setSelectedItemId} selectedItemId={selectedItemId} />
-          <Lane title="Future" items={grouped.future} onSelect={setSelectedItemId} selectedItemId={selectedItemId} />
-          <Lane title="Completed" items={grouped.completed} onSelect={setSelectedItemId} selectedItemId={selectedItemId} />
+          <Lane title="Next meeting" laneKey="nextMeeting" items={grouped.nextMeeting} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
+          <Lane title="Board to-dos" laneKey="todos" items={grouped.todos} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
+          <Lane title="Future" laneKey="future" items={grouped.future} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
+          <Lane title="Completed" laneKey="completed" items={grouped.completed} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
         </section>
       </main>
 
@@ -427,7 +467,7 @@ function DesktopShell(props: any) {
 
 function MobileShell(props: any) {
   const {
-    meetings, grouped, selectedItem, stats, error, notice, loadData, saving, draft, setDraft,
+    meetings, grouped, selectedItem, draggedItemId, setDraggedItemId, reorderItems, stats, error, notice, loadData, saving, draft, setDraft,
     createItem, creating, updateSelectedItem, docDraft, setDocDraft, linkSharePointDocument,
     linkingDocument, uploadFile, setUploadFile, uploadTitle, setUploadTitle, uploadNotes,
     setUploadNotes, uploadDocument, uploadingDocument, meetingsList, mobileTab, setMobileTab, onSelectItem,
@@ -451,10 +491,10 @@ function MobileShell(props: any) {
       {mobileTab === 'board' && (
         <main className="mobile-page">
           <MeetingsPanel meetings={meetings} compact />
-          <MobileLane title="Next meeting" items={grouped.nextMeeting} onSelect={onSelectItem} />
-          <MobileLane title="Board to-dos" items={grouped.todos} onSelect={onSelectItem} />
-          <MobileLane title="Future" items={grouped.future} onSelect={onSelectItem} />
-          <MobileLane title="Completed" items={grouped.completed} onSelect={onSelectItem} />
+          <MobileLane title="Next meeting" laneKey="nextMeeting" items={grouped.nextMeeting} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
+          <MobileLane title="Board to-dos" laneKey="todos" items={grouped.todos} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
+          <MobileLane title="Future" laneKey="future" items={grouped.future} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
+          <MobileLane title="Completed" laneKey="completed" items={grouped.completed} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
         </main>
       )}
 
@@ -691,7 +731,25 @@ function EditableField({ label, value, onSave, multiline = false, saving, compac
   );
 }
 
-function Lane({ title, items, onSelect, selectedItemId }: { title: string; items: AgendaItem[]; onSelect: (id: string) => void; selectedItemId: string | null; }) {
+function Lane({
+  title,
+  laneKey,
+  items,
+  onSelect,
+  selectedItemId,
+  draggedItemId,
+  setDraggedItemId,
+  reorderItems,
+}: {
+  title: string;
+  laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed';
+  items: AgendaItem[];
+  onSelect: (id: string) => void;
+  selectedItemId: string | null;
+  draggedItemId: string | null;
+  setDraggedItemId: (id: string | null) => void;
+  reorderItems: (laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed', draggedId: string, targetId: string) => Promise<void>;
+}) {
   return (
     <section className="lane panelish">
       <div className="lane-header">
@@ -700,10 +758,26 @@ function Lane({ title, items, onSelect, selectedItemId }: { title: string; items
       </div>
       <div className="lane-stack">
         {items.map((item) => (
-          <button key={item.id} className={`issue-card ${selectedItemId === item.id ? 'active' : ''}`} onClick={() => onSelect(item.id)}>
-            <div className="issue-meta-row">
-              <span className={`dot status-${item.status}`} />
-              <span className="issue-id">{item.id}</span>
+          <button
+            key={item.id}
+            className={`issue-card ${selectedItemId === item.id ? 'active' : ''} ${draggedItemId === item.id ? 'dragging' : ''}`}
+            draggable
+            onDragStart={() => setDraggedItemId(item.id)}
+            onDragEnd={() => setDraggedItemId(null)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={async (e) => {
+              e.preventDefault();
+              if (draggedItemId) await reorderItems(laneKey, draggedItemId, item.id);
+              setDraggedItemId(null);
+            }}
+            onClick={() => onSelect(item.id)}
+          >
+            <div className="drag-handle-row">
+              <span className="drag-grip">⋮⋮</span>
+              <div className="issue-meta-row">
+                <span className={`dot status-${item.status}`} />
+                <span className="issue-id">{item.id}</span>
+              </div>
             </div>
             <div className="issue-title">{item.title}</div>
             <div className="issue-subtitle">{item.description || 'No description yet.'}</div>
@@ -720,7 +794,23 @@ function Lane({ title, items, onSelect, selectedItemId }: { title: string; items
   );
 }
 
-function MobileLane({ title, items, onSelect }: { title: string; items: AgendaItem[]; onSelect: (id: string) => void; }) {
+function MobileLane({
+  title,
+  laneKey,
+  items,
+  onSelect,
+  draggedItemId,
+  setDraggedItemId,
+  reorderItems,
+}: {
+  title: string;
+  laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed';
+  items: AgendaItem[];
+  onSelect: (id: string) => void;
+  draggedItemId: string | null;
+  setDraggedItemId: (id: string | null) => void;
+  reorderItems: (laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed', draggedId: string, targetId: string) => Promise<void>;
+}) {
   return (
     <section className="mobile-section panelish">
       <div className="lane-header">
@@ -729,10 +819,26 @@ function MobileLane({ title, items, onSelect }: { title: string; items: AgendaIt
       </div>
       <div className="lane-stack mobile-list-stack">
         {items.map((item) => (
-          <button key={item.id} className="issue-card mobile-issue-card" onClick={() => onSelect(item.id)}>
-            <div className="issue-meta-row">
-              <span className={`dot status-${item.status}`} />
-              <span className="issue-id">{item.id}</span>
+          <button
+            key={item.id}
+            className={`issue-card mobile-issue-card ${draggedItemId === item.id ? 'dragging' : ''}`}
+            draggable
+            onDragStart={() => setDraggedItemId(item.id)}
+            onDragEnd={() => setDraggedItemId(null)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={async (e) => {
+              e.preventDefault();
+              if (draggedItemId) await reorderItems(laneKey, draggedItemId, item.id);
+              setDraggedItemId(null);
+            }}
+            onClick={() => onSelect(item.id)}
+          >
+            <div className="drag-handle-row">
+              <span className="drag-grip">⋮⋮</span>
+              <div className="issue-meta-row">
+                <span className={`dot status-${item.status}`} />
+                <span className="issue-id">{item.id}</span>
+              </div>
             </div>
             <div className="issue-title">{item.title}</div>
             <div className="issue-chip-row">
