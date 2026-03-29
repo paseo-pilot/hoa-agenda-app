@@ -18,6 +18,7 @@ const SP_HOST = process.env.VITE_SP_HOSTNAME || 'noodlebug.sharepoint.com';
 const SP_SITE_PATH = process.env.VITE_SP_SITE_PATH || '/sites/ElPaseoHOA';
 const SP_BACKEND_ROOT = process.env.HOA_AGENDA_SP_BACKEND_ROOT || 'General/OpenClaw Backend';
 const SP_DOC_LIB_NAME = process.env.HOA_AGENDA_SP_DOC_LIB_NAME || 'HOA Agenda Documents';
+const PERMIT_STATUS_OPTIONS = ['Pending', 'Approved', 'Denied'];
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new Database(DB_PATH);
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS agenda_items (
   description TEXT,
   category TEXT,
   priority TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   kind TEXT NOT NULL,
   status TEXT NOT NULL,
   meeting_intent TEXT,
@@ -84,6 +86,72 @@ CREATE TABLE IF NOT EXISTS item_history (
   created_at TEXT NOT NULL,
   FOREIGN KEY (item_id) REFERENCES agenda_items(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS homeowners (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  account_number TEXT NOT NULL,
+  unit_display TEXT NOT NULL,
+  property_address TEXT,
+  mailing_address TEXT,
+  is_rental INTEGER NOT NULL DEFAULT 0,
+  source_email TEXT,
+  notes TEXT,
+  source_file TEXT,
+  source_updated_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE (account_number, unit_display)
+);
+
+CREATE TABLE IF NOT EXISTS homeowner_contacts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  homeowner_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
+  email TEXT,
+  phone TEXT,
+  role TEXT,
+  is_board_member INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (homeowner_id) REFERENCES homeowners(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS homeowner_parking_permits (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  homeowner_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  year TEXT,
+  status TEXT,
+  permit_number TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (homeowner_id) REFERENCES homeowners(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS homeowner_parking_permit_documents (
+  permit_id INTEGER NOT NULL,
+  document_id TEXT NOT NULL,
+  relation_type TEXT NOT NULL DEFAULT 'reference',
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (permit_id, document_id),
+  FOREIGN KEY (permit_id) REFERENCES homeowner_parking_permits(id) ON DELETE CASCADE,
+  FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS homeowner_automobiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  homeowner_id INTEGER NOT NULL,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  license_plate TEXT,
+  make TEXT,
+  model TEXT,
+  color TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (homeowner_id) REFERENCES homeowners(id) ON DELETE CASCADE
+);
 `);
 
 try {
@@ -91,8 +159,47 @@ try {
 } catch (err) {
   // ignore if column already exists
 }
+try {
+  db.exec(`ALTER TABLE agenda_items ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`);
+} catch (err) {
+  // ignore if column already exists
+}
+try {
+  db.exec(`ALTER TABLE homeowner_parking_permits ADD COLUMN permit_number TEXT`);
+} catch (err) {
+  // ignore if column already exists
+}
+try {
+  db.exec(`ALTER TABLE homeowner_parking_permits ADD COLUMN notes TEXT`);
+} catch (err) {
+  // ignore if column already exists
+}
+db.prepare(`
+  UPDATE homeowner_parking_permits
+  SET status = 'Pending'
+  WHERE status IS NULL OR TRIM(status) = ''
+`).run();
+const normalizePermitStatuses = db.prepare('UPDATE homeowner_parking_permits SET status = ? WHERE id = ?');
+db.prepare('SELECT id, status FROM homeowner_parking_permits').all().forEach((row) => {
+  const status = normalizePermitStatus(row.status, 'Pending');
+  normalizePermitStatuses.run(status, row.id);
+});
 
 const nowIso = () => new Date().toISOString();
+
+function normalizeSortOrder() {
+  const rows = db.prepare('SELECT id FROM agenda_items ORDER BY sort_order ASC, created_at ASC, id ASC').all();
+  const update = db.prepare('UPDATE agenda_items SET sort_order = ? WHERE id = ?');
+  const tx = db.transaction((items) => {
+    items.forEach((row, index) => update.run(index + 1, row.id));
+  });
+  tx(rows);
+}
+
+function nextSortOrder() {
+  const row = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM agenda_items').get();
+  return Number(row.max_sort || 0) + 1;
+}
 
 function seedMeetings() {
   const rows = [
@@ -119,10 +226,10 @@ function seedFromLegacyJson() {
   const raw = JSON.parse(fs.readFileSync(LEGACY_JSON_PATH, 'utf8'));
   const insertItem = db.prepare(`
     INSERT INTO agenda_items (
-      id, title, description, category, priority, kind, status, meeting_intent,
+      id, title, description, category, priority, sort_order, kind, status, meeting_intent,
       target_meeting_id, owner, decision_needed, next_action, notes_json, created_at, updated_at
     ) VALUES (
-      @id, @title, @description, @category, @priority, @kind, @status, @meeting_intent,
+      @id, @title, @description, @category, @priority, @sort_order, @kind, @status, @meeting_intent,
       @target_meeting_id, @owner, @decision_needed, @next_action, @notes_json, @created_at, @updated_at
     )
   `);
@@ -146,6 +253,7 @@ function seedFromLegacyJson() {
         description: item.description || null,
         category: item.category || null,
         priority: item.priority || null,
+        sort_order: nextSortOrder(),
         kind: item.kind || 'task',
         status: item.status || 'todo',
         meeting_intent: item.meetingIntent || null,
@@ -167,8 +275,29 @@ function seedFromLegacyJson() {
   tx(raw);
 }
 
+function normalizeString(input) {
+  const value = input == null ? '' : String(input);
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function normalizePermitStatus(input, fallback = null) {
+  const normalized = normalizeString(input);
+  if (!normalized) return fallback;
+  const matched = PERMIT_STATUS_OPTIONS.find((option) => option.toLowerCase() === normalized.toLowerCase());
+  return matched || null;
+}
+
+function toIntBoolean(value) {
+  return value ? 1 : 0;
+}
+
 seedMeetings();
 seedFromLegacyJson();
+const needsSortNormalization = db.prepare('SELECT 1 AS needs FROM agenda_items WHERE sort_order = 0 LIMIT 1').get();
+if (needsSortNormalization) {
+  normalizeSortOrder();
+}
 
 function loadToken() {
   if (!fs.existsSync(TOKEN_PATH)) throw new Error(`Missing Graph token file at ${TOKEN_PATH}`);
@@ -328,6 +457,22 @@ async function ensureAgendaFolderChain(driveId, itemId, title) {
   };
 }
 
+async function ensureParkingPermitFolderChain(driveId, permit) {
+  await getDriveItemByPath(driveId, SP_BACKEND_ROOT);
+  await ensureChildFolder(driveId, SP_BACKEND_ROOT, SP_DOC_LIB_NAME);
+  const permitsPath = `${SP_BACKEND_ROOT}/${SP_DOC_LIB_NAME}`;
+  await ensureChildFolder(driveId, permitsPath, 'Parking Permits');
+  const basePath = `${permitsPath}/Parking Permits`;
+  const yearFolder = `Year ${sanitizePathSegment(permit.year || 'Unknown')}`;
+  const unitFolder = `Unit ${sanitizePathSegment(permit.unit_display || 'Unknown')}`;
+  const permitSuffix = permit.permit_number ? ` ${sanitizePathSegment(permit.permit_number)}` : '';
+  const permitFolderName = `Permit ${permit.id}${permitSuffix}`;
+  await ensureChildFolder(driveId, basePath, yearFolder);
+  await ensureChildFolder(driveId, `${basePath}/${yearFolder}`, unitFolder);
+  await ensureChildFolder(driveId, `${basePath}/${yearFolder}/${unitFolder}`, permitFolderName);
+  return `${basePath}/${yearFolder}/${unitFolder}/${permitFolderName}`;
+}
+
 function getItem(itemId) {
   const item = db.prepare(`
     SELECT ai.*, m.title AS target_meeting_title, m.meeting_date AS target_meeting_date
@@ -360,9 +505,86 @@ function getItem(itemId) {
   };
 }
 
+function getPermitDocuments(permitId) {
+  return db.prepare(`
+    SELECT d.*, pdoc.relation_type
+    FROM homeowner_parking_permit_documents pdoc
+    JOIN documents d ON d.id = pdoc.document_id
+    WHERE pdoc.permit_id = ?
+    ORDER BY d.updated_at DESC
+  `).all(permitId);
+}
+
+function getParkingPermitById(permitId) {
+  const permit = db.prepare(`
+    SELECT
+      p.*,
+      h.unit_display,
+      h.account_number,
+      COALESCE((SELECT GROUP_CONCAT(c.name, CHAR(31)) FROM homeowner_contacts c WHERE c.homeowner_id = h.id), '') AS contact_names
+    FROM homeowner_parking_permits p
+    JOIN homeowners h ON h.id = p.homeowner_id
+    WHERE p.id = ?
+  `).get(permitId);
+
+  if (!permit) return null;
+
+  const homeownerNames = String(permit.contact_names || '')
+    .split('\u001f')
+    .map((name) => String(name).trim())
+    .filter(Boolean);
+  const documents = getPermitDocuments(permit.id);
+  const automobiles = db.prepare(`
+    SELECT id, sort_order, license_plate, make, model, color
+    FROM homeowner_automobiles
+    WHERE homeowner_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(permit.homeowner_id);
+
+  return {
+    ...permit,
+    status: normalizePermitStatus(permit.status, 'Pending'),
+    homeowner_names: homeownerNames,
+    documents,
+    automobiles,
+    document_count: documents.length,
+  };
+}
+
+function mapHomeownerDetail(homeowner) {
+  const permits = db.prepare(`
+    SELECT id, sort_order, year, status, permit_number, notes
+    FROM homeowner_parking_permits
+    WHERE homeowner_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(homeowner.id);
+
+  return {
+    ...homeowner,
+    is_rental: Boolean(homeowner.is_rental),
+    contacts: db.prepare(`
+      SELECT id, sort_order, name, email, phone, role, is_board_member
+      FROM homeowner_contacts
+      WHERE homeowner_id = ?
+      ORDER BY sort_order ASC, id ASC
+    `).all(homeowner.id).map((contact) => ({ ...contact, is_board_member: Boolean(contact.is_board_member) })),
+    parking_permits: permits.map((permit) => ({
+      ...permit,
+      status: normalizePermitStatus(permit.status, 'Pending'),
+      documents: getPermitDocuments(permit.id),
+    })),
+    automobiles: db.prepare(`
+      SELECT id, sort_order, license_plate, make, model, color
+      FROM homeowner_automobiles
+      WHERE homeowner_id = ?
+      ORDER BY sort_order ASC, id ASC
+    `).all(homeowner.id),
+  };
+}
+
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
 
 function mountApi(prefix = '') {
   app.get(`${prefix}/api/health`, (_req, res) => {
@@ -379,10 +601,7 @@ function mountApi(prefix = '') {
       SELECT ai.*, m.title AS target_meeting_title, m.meeting_date AS target_meeting_date
       FROM agenda_items ai
       LEFT JOIN meetings m ON m.id = ai.target_meeting_id
-      ORDER BY
-        CASE ai.priority WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-        ai.updated_at DESC,
-        ai.title ASC
+      ORDER BY ai.sort_order ASC, ai.updated_at DESC, ai.title ASC
     `).all();
     res.json(rows.map((row) => ({ ...row, notes: JSON.parse(row.notes_json || '[]') })));
   });
@@ -393,21 +612,369 @@ function mountApi(prefix = '') {
     res.json(item);
   });
 
+  app.get(`${prefix}/api/homeowners`, (req, res) => {
+    const rows = db.prepare(`
+      SELECT
+        h.*,
+        (SELECT COUNT(*) FROM homeowner_contacts c WHERE c.homeowner_id = h.id) AS contact_count,
+        (SELECT COUNT(*) FROM homeowner_parking_permits p WHERE p.homeowner_id = h.id) AS permit_count,
+        (SELECT COUNT(*) FROM homeowner_automobiles a WHERE a.homeowner_id = h.id) AS automobile_count,
+        COALESCE((SELECT GROUP_CONCAT(c.name, CHAR(31)) FROM homeowner_contacts c WHERE c.homeowner_id = h.id), '') AS contact_names,
+        COALESCE((SELECT GROUP_CONCAT(c.email, ' ') FROM homeowner_contacts c WHERE c.homeowner_id = h.id), '') AS contact_emails
+      FROM homeowners h
+      ORDER BY CAST(h.unit_display AS INTEGER) ASC, h.unit_display ASC, h.account_number ASC
+    `).all();
+
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const filtered = q
+      ? rows.filter((row) => {
+        const haystack = [
+          row.account_number,
+          row.unit_display,
+          row.property_address,
+          row.mailing_address,
+          row.source_email,
+          row.notes,
+          row.contact_names,
+          row.contact_emails,
+        ].map((value) => String(value || '').toLowerCase()).join(' ');
+        return haystack.includes(q);
+      })
+      : rows;
+
+    res.json(filtered.map((row) => {
+      const { contact_emails: _contactEmails, ...rest } = row;
+      const contactNames = String(row.contact_names || '')
+        .split('\u001f')
+        .map((name) => String(name).trim())
+        .filter(Boolean);
+      return { ...rest, is_rental: Boolean(rest.is_rental), contact_names: contactNames };
+    }));
+  });
+
+  app.get(`${prefix}/api/homeowners/:id`, (req, res) => {
+    const homeownerId = Number(req.params.id);
+    if (!Number.isFinite(homeownerId)) return res.status(400).json({ error: 'Invalid homeowner id' });
+    const homeowner = db.prepare('SELECT * FROM homeowners WHERE id = ?').get(homeownerId);
+    if (!homeowner) return res.status(404).json({ error: 'Not found' });
+    res.json(mapHomeownerDetail(homeowner));
+  });
+
+  app.get(`${prefix}/api/board-members`, (_req, res) => {
+    const rows = db.prepare(`
+      SELECT
+        c.id AS contact_id,
+        c.name,
+        c.email,
+        c.phone,
+        c.role,
+        c.sort_order,
+        h.id AS homeowner_id,
+        h.account_number,
+        h.unit_display,
+        h.property_address
+      FROM homeowner_contacts c
+      JOIN homeowners h ON h.id = c.homeowner_id
+      WHERE c.is_board_member = 1
+      ORDER BY CAST(h.unit_display AS INTEGER) ASC, h.unit_display ASC, h.account_number ASC, c.sort_order ASC, c.id ASC
+    `).all();
+
+    res.json(rows);
+  });
+
+  app.get(`${prefix}/api/parking-permits/years`, (_req, res) => {
+    const years = db.prepare(`
+      SELECT DISTINCT year
+      FROM homeowner_parking_permits
+      WHERE year IS NOT NULL AND TRIM(year) <> ''
+      ORDER BY year DESC
+    `).all().map((row) => row.year);
+    res.json(years);
+  });
+
+  app.get(`${prefix}/api/parking-permits`, (req, res) => {
+    const yearFilter = normalizeString(req.query.year);
+    const rows = db.prepare(`
+      SELECT
+        p.*,
+        h.unit_display,
+        h.account_number,
+        COALESCE((SELECT GROUP_CONCAT(c.name, CHAR(31)) FROM homeowner_contacts c WHERE c.homeowner_id = h.id), '') AS contact_names
+      FROM homeowner_parking_permits p
+      JOIN homeowners h ON h.id = p.homeowner_id
+      WHERE (? IS NULL OR p.year = ?)
+      ORDER BY CAST(h.unit_display AS INTEGER) ASC, h.unit_display ASC, h.account_number ASC, p.sort_order ASC, p.id ASC
+    `).all(yearFilter, yearFilter);
+
+    res.json(rows.map((row) => ({
+      ...row,
+      status: normalizePermitStatus(row.status, 'Pending'),
+      homeowner_names: String(row.contact_names || '')
+        .split('\u001f')
+        .map((name) => String(name).trim())
+        .filter(Boolean),
+      document_count: db.prepare('SELECT COUNT(*) AS count FROM homeowner_parking_permit_documents WHERE permit_id = ?').get(row.id).count,
+    })));
+  });
+
+  app.get(`${prefix}/api/parking-permits/:id`, (req, res) => {
+    const permitId = Number(req.params.id);
+    if (!Number.isFinite(permitId)) return res.status(400).json({ error: 'Invalid permit id' });
+    const permit = getParkingPermitById(permitId);
+    if (!permit) return res.status(404).json({ error: 'Not found' });
+    res.json(permit);
+  });
+
+  app.post(`${prefix}/api/homeowners/:id/parking-permits`, (req, res) => {
+    const homeownerId = Number(req.params.id);
+    if (!Number.isFinite(homeownerId)) return res.status(400).json({ error: 'Invalid homeowner id' });
+    const homeowner = db.prepare('SELECT id FROM homeowners WHERE id = ?').get(homeownerId);
+    if (!homeowner) return res.status(404).json({ error: 'Homeowner not found' });
+
+    const body = req.body || {};
+    const year = normalizeString(body.year);
+    const permitNumber = normalizeString(body.permit_number);
+    const notes = normalizeString(body.notes);
+    const status = normalizePermitStatus(body.status, 'Pending');
+    if (body.status != null && !status) {
+      return res.status(400).json({ error: `Permit status must be one of: ${PERMIT_STATUS_OPTIONS.join(', ')}` });
+    }
+    if (!year && !permitNumber) {
+      return res.status(400).json({ error: 'Permit year or permit number is required' });
+    }
+
+    const updatedAt = nowIso();
+    const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM homeowner_parking_permits WHERE homeowner_id = ?').get(homeownerId);
+    const insert = db.prepare(`
+      INSERT INTO homeowner_parking_permits (
+        homeowner_id, sort_order, year, status, permit_number, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = insert.run(homeownerId, Number(maxSort.max_sort || 0) + 1, year, status, permitNumber, notes, updatedAt, updatedAt);
+    const permit = getParkingPermitById(Number(result.lastInsertRowid));
+    res.status(201).json(permit);
+  });
+
+  app.patch(`${prefix}/api/parking-permits/:id`, (req, res) => {
+    const permitId = Number(req.params.id);
+    if (!Number.isFinite(permitId)) return res.status(400).json({ error: 'Invalid permit id' });
+    const existing = db.prepare('SELECT * FROM homeowner_parking_permits WHERE id = ?').get(permitId);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    const body = req.body || {};
+    const year = Object.prototype.hasOwnProperty.call(body, 'year') ? normalizeString(body.year) : normalizeString(existing.year);
+    const permitNumber = Object.prototype.hasOwnProperty.call(body, 'permit_number')
+      ? normalizeString(body.permit_number)
+      : normalizeString(existing.permit_number);
+    const notes = Object.prototype.hasOwnProperty.call(body, 'notes')
+      ? normalizeString(body.notes)
+      : normalizeString(existing.notes);
+    const status = Object.prototype.hasOwnProperty.call(body, 'status')
+      ? normalizePermitStatus(body.status, 'Pending')
+      : normalizePermitStatus(existing.status, 'Pending');
+
+    if (Object.prototype.hasOwnProperty.call(body, 'status') && body.status != null && !status) {
+      return res.status(400).json({ error: `Permit status must be one of: ${PERMIT_STATUS_OPTIONS.join(', ')}` });
+    }
+    if (!year && !permitNumber) {
+      return res.status(400).json({ error: 'Permit year or permit number is required' });
+    }
+
+    db.prepare(`
+      UPDATE homeowner_parking_permits
+      SET year = ?, status = ?, permit_number = ?, notes = ?, updated_at = ?
+      WHERE id = ?
+    `).run(year, status, permitNumber, notes, nowIso(), permitId);
+
+    const permit = getParkingPermitById(permitId);
+    res.json(permit);
+  });
+
+  app.delete(`${prefix}/api/parking-permits/:id`, (req, res) => {
+    const permitId = Number(req.params.id);
+    if (!Number.isFinite(permitId)) return res.status(400).json({ error: 'Invalid permit id' });
+    const existing = db.prepare('SELECT id FROM homeowner_parking_permits WHERE id = ?').get(permitId);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+    db.prepare('DELETE FROM homeowner_parking_permits WHERE id = ?').run(permitId);
+    res.json({ ok: true, deleted: true, permitId });
+  });
+
+  app.patch(`${prefix}/api/homeowners/:id`, (req, res) => {
+    const homeownerId = Number(req.params.id);
+    if (!Number.isFinite(homeownerId)) return res.status(400).json({ error: 'Invalid homeowner id' });
+    const existing = db.prepare('SELECT * FROM homeowners WHERE id = ?').get(homeownerId);
+    if (!existing) return res.status(404).json({ error: 'Not found' });
+
+    const body = req.body || {};
+    const forbiddenFields = ['account_number', 'unit_display', 'property_address'];
+    const attemptedReadonly = forbiddenFields.find((field) => Object.prototype.hasOwnProperty.call(body, field));
+    if (attemptedReadonly) {
+      return res.status(400).json({ error: `${attemptedReadonly} is read-only` });
+    }
+
+    const contacts = body.contacts;
+    const permits = body.parking_permits;
+    const automobiles = body.automobiles;
+
+    if (contacts != null && !Array.isArray(contacts)) return res.status(400).json({ error: 'contacts must be an array' });
+    if (permits != null && !Array.isArray(permits)) return res.status(400).json({ error: 'parking_permits must be an array' });
+    if (automobiles != null && !Array.isArray(automobiles)) return res.status(400).json({ error: 'automobiles must be an array' });
+    if (Array.isArray(permits)) {
+      for (const permit of permits) {
+        if (permit == null || typeof permit !== 'object') {
+          return res.status(400).json({ error: 'parking_permits entries must be objects' });
+        }
+        if (permit.status != null && normalizePermitStatus(permit.status) == null) {
+          return res.status(400).json({ error: `Permit status must be one of: ${PERMIT_STATUS_OPTIONS.join(', ')}` });
+        }
+      }
+    }
+
+    const updatedAt = nowIso();
+    const updateHomeowner = db.prepare(`
+      UPDATE homeowners
+      SET mailing_address = ?, is_rental = ?, source_email = ?, notes = ?, updated_at = ?
+      WHERE id = ?
+    `);
+    const deleteContacts = db.prepare('DELETE FROM homeowner_contacts WHERE homeowner_id = ?');
+    const deleteAutomobiles = db.prepare('DELETE FROM homeowner_automobiles WHERE homeowner_id = ?');
+
+    const insertContact = db.prepare(`
+      INSERT INTO homeowner_contacts (
+        homeowner_id, sort_order, name, email, phone, role, is_board_member, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertPermit = db.prepare(`
+      INSERT INTO homeowner_parking_permits (
+        homeowner_id, sort_order, year, status, permit_number, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const updatePermit = db.prepare(`
+      UPDATE homeowner_parking_permits
+      SET sort_order = ?, year = ?, status = ?, permit_number = ?, notes = ?, updated_at = ?
+      WHERE id = ? AND homeowner_id = ?
+    `);
+    const deletePermitById = db.prepare('DELETE FROM homeowner_parking_permits WHERE id = ? AND homeowner_id = ?');
+    const insertAutomobile = db.prepare(`
+      INSERT INTO homeowner_automobiles (
+        homeowner_id, sort_order, license_plate, make, model, color, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const tx = db.transaction(() => {
+      updateHomeowner.run(
+        Object.prototype.hasOwnProperty.call(body, 'mailing_address') ? normalizeString(body.mailing_address) : normalizeString(existing.mailing_address),
+        Object.prototype.hasOwnProperty.call(body, 'is_rental') ? toIntBoolean(body.is_rental) : toIntBoolean(existing.is_rental),
+        Object.prototype.hasOwnProperty.call(body, 'source_email') ? normalizeString(body.source_email) : normalizeString(existing.source_email),
+        Object.prototype.hasOwnProperty.call(body, 'notes') ? normalizeString(body.notes) : normalizeString(existing.notes),
+        updatedAt,
+        homeownerId,
+      );
+
+      if (Array.isArray(contacts)) {
+        deleteContacts.run(homeownerId);
+        contacts.forEach((contact, index) => {
+          insertContact.run(
+            homeownerId,
+            index + 1,
+            normalizeString(contact?.name) || '(Unnamed contact)',
+            normalizeString(contact?.email),
+            normalizeString(contact?.phone),
+            normalizeString(contact?.role),
+            toIntBoolean(contact?.is_board_member),
+            updatedAt,
+            updatedAt,
+          );
+        });
+      }
+
+      if (Array.isArray(permits)) {
+        const existingPermitIds = new Set(
+          db.prepare('SELECT id FROM homeowner_parking_permits WHERE homeowner_id = ?').all(homeownerId).map((row) => row.id),
+        );
+        const seenPermitIds = new Set();
+        let sortOrder = 1;
+
+        permits.forEach((permit) => {
+          const permitId = Number(permit?.id);
+          const year = normalizeString(permit?.year);
+          const permitNumber = normalizeString(permit?.permit_number);
+          const notes = normalizeString(permit?.notes);
+          const status = normalizePermitStatus(permit?.status, 'Pending');
+          if (!year && !permitNumber && !Number.isFinite(permitId)) return;
+
+          if (Number.isFinite(permitId) && existingPermitIds.has(permitId) && !seenPermitIds.has(permitId)) {
+            updatePermit.run(
+              sortOrder,
+              year,
+              status,
+              permitNumber,
+              notes,
+              updatedAt,
+              permitId,
+              homeownerId,
+            );
+            seenPermitIds.add(permitId);
+            sortOrder += 1;
+            return;
+          }
+
+          insertPermit.run(
+            homeownerId,
+            sortOrder,
+            year,
+            status,
+            permitNumber,
+            notes,
+            updatedAt,
+            updatedAt,
+          );
+          sortOrder += 1;
+        });
+
+        existingPermitIds.forEach((permitId) => {
+          if (!seenPermitIds.has(permitId)) deletePermitById.run(permitId, homeownerId);
+        });
+      }
+
+      if (Array.isArray(automobiles)) {
+        deleteAutomobiles.run(homeownerId);
+        automobiles.forEach((automobile, index) => {
+          insertAutomobile.run(
+            homeownerId,
+            index + 1,
+            normalizeString(automobile?.license_plate),
+            normalizeString(automobile?.make),
+            normalizeString(automobile?.model),
+            normalizeString(automobile?.color),
+            updatedAt,
+            updatedAt,
+          );
+        });
+      }
+    });
+
+    tx();
+    const homeowner = db.prepare('SELECT * FROM homeowners WHERE id = ?').get(homeownerId);
+    res.json(mapHomeownerDetail(homeowner));
+  });
+
   app.post(`${prefix}/api/items`, (req, res) => {
     const body = req.body || {};
     const id = body.id || `AI-${Date.now()}`;
     const createdAt = nowIso();
     db.prepare(`
       INSERT INTO agenda_items (
-        id, title, description, category, priority, kind, status, meeting_intent,
+        id, title, description, category, priority, sort_order, kind, status, meeting_intent,
         target_meeting_id, owner, decision_needed, next_action, notes_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       id,
       body.title,
       body.description || null,
       body.category || null,
       body.priority || 'medium',
+      body.sort_order || nextSortOrder(),
       body.kind || 'task',
       body.status || 'todo',
       body.meeting_intent || null,
@@ -436,7 +1003,7 @@ function mountApi(prefix = '') {
 
     db.prepare(`
       UPDATE agenda_items SET
-        title = ?, description = ?, category = ?, priority = ?, kind = ?, status = ?,
+        title = ?, description = ?, category = ?, priority = ?, sort_order = ?, kind = ?, status = ?,
         meeting_intent = ?, target_meeting_id = ?, owner = ?, decision_needed = ?,
         next_action = ?, notes_json = ?, updated_at = ?
       WHERE id = ?
@@ -445,6 +1012,7 @@ function mountApi(prefix = '') {
       updated.description || null,
       updated.category || null,
       updated.priority || null,
+      updated.sort_order ?? existing.sort_order ?? nextSortOrder(),
       updated.kind,
       updated.status,
       updated.meeting_intent || null,
@@ -465,6 +1033,18 @@ function mountApi(prefix = '') {
     );
 
     res.json(getItem(req.params.id));
+  });
+
+  app.post(`${prefix}/api/items/reorder`, (req, res) => {
+    const body = req.body || {};
+    const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter(Boolean) : [];
+    if (!itemIds.length) return res.status(400).json({ error: 'itemIds is required' });
+    const update = db.prepare('UPDATE agenda_items SET sort_order = ? WHERE id = ?');
+    const tx = db.transaction((ids) => {
+      ids.forEach((id, index) => update.run(index + 1, id));
+    });
+    tx(itemIds);
+    res.json({ ok: true, itemIds });
   });
 
   app.get(`${prefix}/api/documents`, (req, res) => {
@@ -625,6 +1205,163 @@ function mountApi(prefix = '') {
       res.status(500).json({ error: err.message });
     }
   });
+
+  app.delete(`${prefix}/api/items/:itemId/documents/:documentId`, (req, res) => {
+    const { itemId, documentId } = req.params;
+    if (!itemId || !documentId) return res.status(400).json({ error: 'itemId and documentId are required' });
+
+    const linkedDoc = db.prepare(`
+      SELECT d.title
+      FROM item_documents idoc
+      JOIN documents d ON d.id = idoc.document_id
+      WHERE idoc.item_id = ? AND idoc.document_id = ?
+    `).get(itemId, documentId);
+
+    if (!linkedDoc) return res.status(404).json({ error: 'Document link not found for item' });
+
+    const timestamp = nowIso();
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM item_documents WHERE item_id = ? AND document_id = ?').run(itemId, documentId);
+      db.prepare('INSERT INTO item_history (item_id, event_type, event_note, created_at) VALUES (?, ?, ?, ?)').run(
+        itemId,
+        'document_unlinked',
+        `Unlinked document ${linkedDoc.title}`,
+        timestamp,
+      );
+    });
+
+    tx();
+    res.json({ ok: true, unlinked: true, itemId, documentId });
+  });
+
+  app.get(`${prefix}/api/parking-permits/:permitId/documents`, (req, res) => {
+    const permitId = Number(req.params.permitId);
+    if (!Number.isFinite(permitId)) return res.status(400).json({ error: 'Invalid permit id' });
+    const permit = db.prepare('SELECT id FROM homeowner_parking_permits WHERE id = ?').get(permitId);
+    if (!permit) return res.status(404).json({ error: 'Permit not found' });
+    res.json(getPermitDocuments(permitId));
+  });
+
+  app.post(`${prefix}/api/parking-permits/:permitId/sharepoint/link`, async (req, res) => {
+    try {
+      const permitId = Number(req.params.permitId);
+      if (!Number.isFinite(permitId)) return res.status(400).json({ error: 'Invalid permit id' });
+      const permit = db.prepare('SELECT id FROM homeowner_parking_permits WHERE id = ?').get(permitId);
+      if (!permit) return res.status(404).json({ error: 'Permit not found' });
+
+      const body = req.body || {};
+      if (!body.title || !body.web_url) {
+        return res.status(400).json({ error: 'title and web_url are required' });
+      }
+      const id = body.id || `DOC-${Date.now()}`;
+      const createdAt = nowIso();
+      db.prepare(`
+        INSERT INTO documents (id, title, source_type, sharepoint_item_id, sharepoint_web_url, sharepoint_path, mime_type, notes, created_at, updated_at)
+        VALUES (?, ?, 'sharepoint', ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        body.title,
+        body.sharepoint_item_id || null,
+        body.web_url,
+        body.sharepoint_path || null,
+        body.mime_type || null,
+        body.notes || null,
+        createdAt,
+        createdAt,
+      );
+      db.prepare(`
+        INSERT OR REPLACE INTO homeowner_parking_permit_documents (permit_id, document_id, relation_type, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        permitId,
+        id,
+        body.relation_type || 'reference',
+        createdAt,
+      );
+      res.status(201).json({ id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post(`${prefix}/api/parking-permits/:permitId/sharepoint/upload`, async (req, res) => {
+    try {
+      const permitId = Number(req.params.permitId);
+      if (!Number.isFinite(permitId)) return res.status(400).json({ error: 'Invalid permit id' });
+      const permit = db.prepare(`
+        SELECT p.id, p.year, p.permit_number, h.unit_display
+        FROM homeowner_parking_permits p
+        JOIN homeowners h ON h.id = p.homeowner_id
+        WHERE p.id = ?
+      `).get(permitId);
+      if (!permit) return res.status(404).json({ error: 'Permit not found' });
+
+      const body = req.body || {};
+      if (!body.filename || !body.content_base64) {
+        return res.status(400).json({ error: 'filename and content_base64 are required' });
+      }
+
+      const { drive } = await ensureSharePointDrive();
+      const folderPath = await ensureParkingPermitFolderChain(drive.id, permit);
+      const safeFilename = sanitizePathSegment(body.filename).replace(/ /g, '_');
+      const uploadPath = `${folderPath}/${safeFilename}`.split('/').map(encodeURIComponent).join('/');
+      const fileBuffer = Buffer.from(body.content_base64, 'base64');
+      const uploaded = await graphRaw(
+        'PUT',
+        `${GRAPH}/drives/${drive.id}/root:/${uploadPath}:/content`,
+        fileBuffer,
+        { 'Content-Type': body.mime_type || 'application/octet-stream' },
+      );
+
+      const docId = `DOC-${Date.now()}`;
+      const createdAt = nowIso();
+      db.prepare(`
+        INSERT INTO documents (id, title, source_type, sharepoint_item_id, sharepoint_web_url, sharepoint_path, mime_type, notes, created_at, updated_at)
+        VALUES (?, ?, 'sharepoint', ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        docId,
+        body.document_title || body.filename,
+        uploaded.id || null,
+        uploaded.webUrl || null,
+        uploaded.parentReference?.path ? `${uploaded.parentReference.path}/${uploaded.name}` : `${folderPath}/${safeFilename}`,
+        body.mime_type || null,
+        body.notes || null,
+        createdAt,
+        createdAt,
+      );
+      db.prepare(`
+        INSERT OR REPLACE INTO homeowner_parking_permit_documents (permit_id, document_id, relation_type, created_at)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        permitId,
+        docId,
+        body.relation_type || 'reference',
+        createdAt,
+      );
+      res.status(201).json({ ok: true, documentId: docId, webUrl: uploaded.webUrl, folderPath });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete(`${prefix}/api/parking-permits/:permitId/documents/:documentId`, (req, res) => {
+    const permitId = Number(req.params.permitId);
+    const { documentId } = req.params;
+    if (!Number.isFinite(permitId) || !documentId) {
+      return res.status(400).json({ error: 'permitId and documentId are required' });
+    }
+
+    const linked = db.prepare(`
+      SELECT d.id
+      FROM homeowner_parking_permit_documents pdoc
+      JOIN documents d ON d.id = pdoc.document_id
+      WHERE pdoc.permit_id = ? AND pdoc.document_id = ?
+    `).get(permitId, documentId);
+    if (!linked) return res.status(404).json({ error: 'Document link not found for permit' });
+
+    db.prepare('DELETE FROM homeowner_parking_permit_documents WHERE permit_id = ? AND document_id = ?').run(permitId, documentId);
+    res.json({ ok: true, unlinked: true, permitId, documentId });
+  });
 }
 
 mountApi('');
@@ -638,7 +1375,12 @@ if (fs.existsSync(CLIENT_DIST)) {
 }
 
 const port = process.env.PORT || 8090;
-app.listen(port, () => {
-  console.log(`HOA agenda server listening on http://127.0.0.1:${port}`);
-  console.log(`SQLite DB: ${DB_PATH}`);
-});
+
+async function startServer() {
+  app.listen(port, () => {
+    console.log(`HOA agenda server listening on http://127.0.0.1:${port}`);
+    console.log(`SQLite DB: ${DB_PATH}`);
+  });
+}
+
+startServer();
