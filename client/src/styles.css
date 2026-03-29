@@ -438,6 +438,14 @@ h1, h2, h3 { margin: 0; }
 .parking-permits-shell .homeowners-list-panel {
   grid-template-rows: auto auto auto minmax(0, 1fr);
 }
+.parking-permits-shell {
+  grid-template-columns: 1fr;
+  grid-template-rows: minmax(320px, 1fr) minmax(320px, 1fr);
+}
+.parking-permits-shell .homeowners-list-panel,
+.parking-permits-shell .homeowners-detail-panel {
+  width: 100%;
+}
 .parking-permit-toolbar-actions {
   display: flex;
   gap: 8px;
@@ -504,6 +512,30 @@ h1, h2, h3 { margin: 0; }
   color: var(--text);
   font-weight: 600;
 }
+.parking-permit-detail-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  align-items: start;
+}
+.parking-permit-half {
+  min-width: 0;
+}
+.parking-permit-half .homeowner-section-card {
+  height: 100%;
+}
+.permits-inline-grid {
+  display: grid;
+  gap: 10px;
+}
+.permit-inline-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  background: rgba(255,255,255,0.02);
+}
 .app-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -521,6 +553,15 @@ h1, h2, h3 { margin: 0; }
 }
 .permit-create-modal {
   background: rgba(16, 19, 26, 0.97);
+}
+.automobile-modal {
+  background: rgba(16, 19, 26, 0.97);
+}
+.automobile-actions {
+  margin-top: 10px;
+}
+.automobile-section-footer {
+  margin-top: 8px;
 }
 @media (max-width: 1200px) {
   .parking-permit-table-grid {
@@ -594,6 +635,9 @@ h1, h2, h3 { margin: 0; }
   .homeowners-shell {
     grid-template-columns: 1fr;
     height: auto;
+  }
+  .parking-permit-detail-split {
+    grid-template-columns: 1fr;
   }
   .homeowners-list {
     max-height: 280px;

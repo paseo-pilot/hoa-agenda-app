@@ -11,6 +11,7 @@ import {
   DraftItem,
   HomeownerDetail,
   HomeownerSummary,
+  HomeownerUpdateAutomobile,
   HomeownerUpdatePayload,
   Meeting,
   MobileTab,
@@ -18,6 +19,40 @@ import {
   ParkingPermitSummary,
   PermitStatus,
 } from './types';
+
+type ModuleKey = 'agenda' | 'homeowners' | 'parking-permits' | 'board-members';
+
+const MODULE_LABELS: Record<ModuleKey, string> = {
+  agenda: 'Agenda',
+  homeowners: 'Homeowners',
+  'board-members': 'Board Members',
+  'parking-permits': 'Parking Permits',
+};
+
+function normalizeBasePath(basePath: string) {
+  let normalized = basePath || '/';
+  if (!normalized.startsWith('/')) normalized = `/${normalized}`;
+  if (!normalized.endsWith('/')) normalized = `${normalized}/`;
+  return normalized;
+}
+
+function moduleFromPathname(pathname: string, basePath: string): ModuleKey {
+  const normalizedBase = normalizeBasePath(basePath);
+  const pathRemainder = pathname.startsWith(normalizedBase)
+    ? pathname.slice(normalizedBase.length)
+    : pathname.replace(/^\/+/, '');
+  const [head] = pathRemainder.split('/').filter(Boolean);
+  if (head === 'homeowners') return 'homeowners';
+  if (head === 'board-members') return 'board-members';
+  if (head === 'parking-permits') return 'parking-permits';
+  return 'agenda';
+}
+
+function pathnameForModule(module: ModuleKey, basePath: string) {
+  const normalizedBase = normalizeBasePath(basePath);
+  if (module === 'agenda') return normalizedBase;
+  return `${normalizedBase}${module}`;
+}
 
 function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -37,7 +72,11 @@ function App() {
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadNotes, setUploadNotes] = useState('');
 
-  const [activeModule, setActiveModule] = useState<'agenda' | 'homeowners' | 'parking-permits' | 'board-members'>('agenda');
+  const [activeModule, setActiveModule] = useState<ModuleKey>(() => (
+    typeof window === 'undefined'
+      ? 'agenda'
+      : moduleFromPathname(window.location.pathname, import.meta.env.BASE_URL)
+  ));
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [homeowners, setHomeowners] = useState<HomeownerSummary[]>([]);
   const [homeownerQuery, setHomeownerQuery] = useState('');
@@ -206,6 +245,22 @@ function App() {
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setActiveModule(moduleFromPathname(window.location.pathname, import.meta.env.BASE_URL));
+      setIsDrawerOpen(false);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    const currentModule = moduleFromPathname(window.location.pathname, import.meta.env.BASE_URL);
+    if (currentModule === activeModule) return;
+    const nextPath = pathnameForModule(activeModule, import.meta.env.BASE_URL);
+    window.history.replaceState({}, '', `${nextPath}${window.location.search}${window.location.hash}`);
+  }, [activeModule]);
 
   useEffect(() => {
     if (!isDrawerOpen) return undefined;
@@ -442,7 +497,7 @@ function App() {
     }
   };
 
-  const createParkingPermit = async (payload: { homeowner_id: number; year?: string | null; status?: PermitStatus | null; permit_number?: string | null }) => {
+  const createParkingPermit = async (payload: { homeowner_id: number; year?: string | null; status?: PermitStatus | null; permit_number?: string | null; notes?: string | null }) => {
     setParkingPermitsError(null);
     const res = await fetch(`${apiBase}/homeowners/${payload.homeowner_id}/parking-permits`, {
       method: 'POST',
@@ -451,6 +506,7 @@ function App() {
         year: payload.year,
         status: payload.status || 'Pending',
         permit_number: payload.permit_number,
+        notes: payload.notes,
       }),
     });
     const data = await res.json();
@@ -464,7 +520,7 @@ function App() {
     ]);
   };
 
-  const saveParkingPermit = async (permitId: number, payload: { year?: string | null; status?: PermitStatus | null; permit_number?: string | null }) => {
+  const saveParkingPermit = async (permitId: number, payload: { year?: string | null; status?: PermitStatus | null; permit_number?: string | null; notes?: string | null }) => {
     setParkingPermitSaving(true);
     setParkingPermitsError(null);
     try {
@@ -483,6 +539,7 @@ function App() {
           year: updated.year,
           status: updated.status,
           permit_number: updated.permit_number,
+          notes: updated.notes,
           homeowner_names: updated.homeowner_names,
           updated_at: updated.updated_at,
           document_count: updated.documents.length,
@@ -555,6 +612,41 @@ function App() {
     if (selectedHomeownerId != null) await refreshHomeownerDetail(selectedHomeownerId);
   };
 
+  const saveParkingPermitAutomobiles = async (homeownerId: number, automobiles: HomeownerUpdateAutomobile[]) => {
+    setParkingPermitsError(null);
+    const res = await fetch(`${apiBase}/homeowners/${homeownerId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ automobiles }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to update automobiles');
+
+    const updated = data as HomeownerDetail;
+    if (selectedHomeownerId === updated.id) {
+      setSelectedHomeowner(updated);
+    }
+    setHomeowners((prev) => prev.map((row) => (
+      row.id === updated.id
+        ? {
+          ...row,
+          mailing_address: updated.mailing_address,
+          is_rental: updated.is_rental,
+          source_email: updated.source_email,
+          notes: updated.notes,
+          contact_count: updated.contacts.length,
+          permit_count: updated.parking_permits.length,
+          automobile_count: updated.automobiles.length,
+          updated_at: updated.updated_at,
+        }
+        : row
+    )));
+
+    if (selectedParkingPermitId != null) {
+      await refreshSelectedParkingPermit(selectedParkingPermitId);
+    }
+  };
+
   const reorderItems = async (laneKey: keyof AgendaGroups, draggedId: string, targetId: string) => {
     if (draggedId === targetId) return;
     const laneItems = [...grouped[laneKey]];
@@ -595,7 +687,11 @@ function App() {
     setMobileTab('item');
   };
 
-  const handleModuleChange = (module: 'agenda' | 'homeowners' | 'parking-permits' | 'board-members') => {
+  const handleModuleChange = (module: ModuleKey) => {
+    if (module !== activeModule) {
+      const nextPath = pathnameForModule(module, import.meta.env.BASE_URL);
+      window.history.pushState({}, '', `${nextPath}${window.location.search}${window.location.hash}`);
+    }
     setActiveModule(module);
     setIsDrawerOpen(false);
   };
@@ -621,15 +717,7 @@ function App() {
           </button>
           <div className="app-header-title">
             <span className="eyebrow">Module</span>
-            <h2>
-              {activeModule === 'agenda'
-                ? 'Agenda'
-                : activeModule === 'homeowners'
-                  ? 'Homeowners'
-                  : activeModule === 'parking-permits'
-                    ? 'Parking Permits'
-                  : 'Board Members'}
-            </h2>
+            <h2>{MODULE_LABELS[activeModule]}</h2>
           </div>
           <div id="module-header-actions" className="app-header-actions" />
         </div>
@@ -798,6 +886,7 @@ function App() {
             onSelectPermit={setSelectedParkingPermitId}
             onCreatePermit={createParkingPermit}
             onSavePermit={saveParkingPermit}
+            onSaveAutomobiles={saveParkingPermitAutomobiles}
             onDeletePermit={deleteParkingPermit}
             onUploadPermitDocument={uploadPermitDocument}
             onRemovePermitDocument={removePermitDocument}

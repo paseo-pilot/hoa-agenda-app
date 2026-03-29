@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS homeowner_parking_permits (
   year TEXT,
   status TEXT,
   permit_number TEXT,
+  notes TEXT,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   FOREIGN KEY (homeowner_id) REFERENCES homeowners(id) ON DELETE CASCADE
@@ -165,6 +166,11 @@ try {
 }
 try {
   db.exec(`ALTER TABLE homeowner_parking_permits ADD COLUMN permit_number TEXT`);
+} catch (err) {
+  // ignore if column already exists
+}
+try {
+  db.exec(`ALTER TABLE homeowner_parking_permits ADD COLUMN notes TEXT`);
 } catch (err) {
   // ignore if column already exists
 }
@@ -525,19 +531,26 @@ function getParkingPermitById(permitId) {
     .map((name) => String(name).trim())
     .filter(Boolean);
   const documents = getPermitDocuments(permit.id);
+  const automobiles = db.prepare(`
+    SELECT id, sort_order, license_plate, make, model, color
+    FROM homeowner_automobiles
+    WHERE homeowner_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(permit.homeowner_id);
 
   return {
     ...permit,
     status: normalizePermitStatus(permit.status, 'Pending'),
     homeowner_names: homeownerNames,
     documents,
+    automobiles,
     document_count: documents.length,
   };
 }
 
 function mapHomeownerDetail(homeowner) {
   const permits = db.prepare(`
-    SELECT id, sort_order, year, status, permit_number
+    SELECT id, sort_order, year, status, permit_number, notes
     FROM homeowner_parking_permits
     WHERE homeowner_id = ?
     ORDER BY sort_order ASC, id ASC
@@ -718,6 +731,7 @@ function mountApi(prefix = '') {
     const body = req.body || {};
     const year = normalizeString(body.year);
     const permitNumber = normalizeString(body.permit_number);
+    const notes = normalizeString(body.notes);
     const status = normalizePermitStatus(body.status, 'Pending');
     if (body.status != null && !status) {
       return res.status(400).json({ error: `Permit status must be one of: ${PERMIT_STATUS_OPTIONS.join(', ')}` });
@@ -730,10 +744,10 @@ function mountApi(prefix = '') {
     const maxSort = db.prepare('SELECT COALESCE(MAX(sort_order), 0) AS max_sort FROM homeowner_parking_permits WHERE homeowner_id = ?').get(homeownerId);
     const insert = db.prepare(`
       INSERT INTO homeowner_parking_permits (
-        homeowner_id, sort_order, year, status, permit_number, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        homeowner_id, sort_order, year, status, permit_number, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const result = insert.run(homeownerId, Number(maxSort.max_sort || 0) + 1, year, status, permitNumber, updatedAt, updatedAt);
+    const result = insert.run(homeownerId, Number(maxSort.max_sort || 0) + 1, year, status, permitNumber, notes, updatedAt, updatedAt);
     const permit = getParkingPermitById(Number(result.lastInsertRowid));
     res.status(201).json(permit);
   });
@@ -749,6 +763,9 @@ function mountApi(prefix = '') {
     const permitNumber = Object.prototype.hasOwnProperty.call(body, 'permit_number')
       ? normalizeString(body.permit_number)
       : normalizeString(existing.permit_number);
+    const notes = Object.prototype.hasOwnProperty.call(body, 'notes')
+      ? normalizeString(body.notes)
+      : normalizeString(existing.notes);
     const status = Object.prototype.hasOwnProperty.call(body, 'status')
       ? normalizePermitStatus(body.status, 'Pending')
       : normalizePermitStatus(existing.status, 'Pending');
@@ -762,9 +779,9 @@ function mountApi(prefix = '') {
 
     db.prepare(`
       UPDATE homeowner_parking_permits
-      SET year = ?, status = ?, permit_number = ?, updated_at = ?
+      SET year = ?, status = ?, permit_number = ?, notes = ?, updated_at = ?
       WHERE id = ?
-    `).run(year, status, permitNumber, nowIso(), permitId);
+    `).run(year, status, permitNumber, notes, nowIso(), permitId);
 
     const permit = getParkingPermitById(permitId);
     res.json(permit);
@@ -826,12 +843,12 @@ function mountApi(prefix = '') {
     `);
     const insertPermit = db.prepare(`
       INSERT INTO homeowner_parking_permits (
-        homeowner_id, sort_order, year, status, permit_number, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        homeowner_id, sort_order, year, status, permit_number, notes, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const updatePermit = db.prepare(`
       UPDATE homeowner_parking_permits
-      SET sort_order = ?, year = ?, status = ?, permit_number = ?, updated_at = ?
+      SET sort_order = ?, year = ?, status = ?, permit_number = ?, notes = ?, updated_at = ?
       WHERE id = ? AND homeowner_id = ?
     `);
     const deletePermitById = db.prepare('DELETE FROM homeowner_parking_permits WHERE id = ? AND homeowner_id = ?');
@@ -879,6 +896,7 @@ function mountApi(prefix = '') {
           const permitId = Number(permit?.id);
           const year = normalizeString(permit?.year);
           const permitNumber = normalizeString(permit?.permit_number);
+          const notes = normalizeString(permit?.notes);
           const status = normalizePermitStatus(permit?.status, 'Pending');
           if (!year && !permitNumber && !Number.isFinite(permitId)) return;
 
@@ -888,6 +906,7 @@ function mountApi(prefix = '') {
               year,
               status,
               permitNumber,
+              notes,
               updatedAt,
               permitId,
               homeownerId,
@@ -903,6 +922,7 @@ function mountApi(prefix = '') {
             year,
             status,
             permitNumber,
+            notes,
             updatedAt,
             updatedAt,
           );

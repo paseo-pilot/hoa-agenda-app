@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
-import { HomeownerSummary, ParkingPermitDetail, ParkingPermitSummary, PermitStatus } from '../types';
+import { EditableAutomobilesSection, AutomobileFormValues } from './automobiles';
+import { HomeownerSummary, HomeownerUpdateAutomobile, ParkingPermitDetail, ParkingPermitSummary, PermitStatus } from '../types';
 
 type ParkingPermitsViewProps = {
   permits: ParkingPermitSummary[];
@@ -16,8 +17,9 @@ type ParkingPermitsViewProps = {
   homeowners: HomeownerSummary[];
   onRefresh: () => Promise<void>;
   onSelectPermit: (permitId: number) => void;
-  onCreatePermit: (payload: { homeowner_id: number; year?: string | null; status?: PermitStatus | null; permit_number?: string | null }) => Promise<void>;
-  onSavePermit: (permitId: number, payload: { year?: string | null; status?: PermitStatus | null; permit_number?: string | null }) => Promise<void>;
+  onCreatePermit: (payload: { homeowner_id: number; year?: string | null; status?: PermitStatus | null; permit_number?: string | null; notes?: string | null }) => Promise<void>;
+  onSavePermit: (permitId: number, payload: { year?: string | null; status?: PermitStatus | null; permit_number?: string | null; notes?: string | null }) => Promise<void>;
+  onSaveAutomobiles: (homeownerId: number, automobiles: HomeownerUpdateAutomobile[]) => Promise<void>;
   onDeletePermit: (permitId: number) => Promise<void>;
   onUploadPermitDocument: (permitId: number, payload: { filename: string; document_title?: string | null; notes?: string | null; mime_type?: string | null; content_base64: string }) => Promise<void>;
   onRemovePermitDocument: (permitId: number, documentId: string) => Promise<void>;
@@ -28,6 +30,7 @@ type PermitForm = {
   year: string;
   status: PermitStatus;
   permit_number: string;
+  notes: string;
 };
 
 const permitStatusOptions: PermitStatus[] = ['Pending', 'Approved', 'Denied'];
@@ -53,6 +56,7 @@ export function ParkingPermitsView({
   onSelectPermit,
   onCreatePermit,
   onSavePermit,
+  onSaveAutomobiles,
   onDeletePermit,
   onUploadPermitDocument,
   onRemovePermitDocument,
@@ -60,7 +64,7 @@ export function ParkingPermitsView({
 }: ParkingPermitsViewProps) {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createHomeownerId, setCreateHomeownerId] = useState<number | null>(null);
-  const [createForm, setCreateForm] = useState<PermitForm>({ year: '', status: 'Pending', permit_number: '' });
+  const [createForm, setCreateForm] = useState<PermitForm>({ year: '', status: 'Pending', permit_number: '', notes: '' });
   const [savingCreate, setSavingCreate] = useState(false);
   const [editForm, setEditForm] = useState<PermitForm | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -68,6 +72,8 @@ export function ParkingPermitsView({
   const [uploadNotes, setUploadNotes] = useState('');
   const [uploadingDocument, setUploadingDocument] = useState(false);
   const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(null);
+  const [automobilesForm, setAutomobilesForm] = useState<AutomobileFormValues[]>([]);
+  const [savingAutomobiles, setSavingAutomobiles] = useState(false);
 
   const homeownerOptions = useMemo(() => homeowners.slice().sort((a, b) => (
     a.unit_display.localeCompare(b.unit_display, undefined, { numeric: true, sensitivity: 'base' })
@@ -80,6 +86,7 @@ export function ParkingPermitsView({
         (selectedPermit.year || '') !== editForm.year
         || selectedPermit.status !== editForm.status
         || (selectedPermit.permit_number || '') !== editForm.permit_number
+        || (selectedPermit.notes || '') !== editForm.notes
       ),
   );
 
@@ -92,7 +99,21 @@ export function ParkingPermitsView({
       year: selectedPermit.year || '',
       status: selectedPermit.status,
       permit_number: selectedPermit.permit_number || '',
+      notes: selectedPermit.notes || '',
     });
+  }, [selectedPermit?.id, selectedPermit?.updated_at]);
+
+  useEffect(() => {
+    if (!selectedPermit) {
+      setAutomobilesForm([]);
+      return;
+    }
+    setAutomobilesForm((selectedPermit.automobiles || []).map((automobile) => ({
+      license_plate: automobile.license_plate || '',
+      make: automobile.make || '',
+      model: automobile.model || '',
+      color: automobile.color || '',
+    })));
   }, [selectedPermit?.id, selectedPermit?.updated_at]);
 
   const onSelect = (permitId: number) => {
@@ -101,6 +122,16 @@ export function ParkingPermitsView({
     setUploadTitle('');
     setUploadNotes('');
   };
+
+  const selectedAutomobilesDirty = Boolean(
+    selectedPermit
+    && JSON.stringify((selectedPermit.automobiles || []).map((automobile) => ({
+      license_plate: automobile.license_plate || '',
+      make: automobile.make || '',
+      model: automobile.model || '',
+      color: automobile.color || '',
+    }))) !== JSON.stringify(automobilesForm),
+  );
 
   const createPermit = async () => {
     if (!createHomeownerId) {
@@ -119,9 +150,10 @@ export function ParkingPermitsView({
         year: normalizeText(createForm.year),
         status: createForm.status,
         permit_number: normalizeText(createForm.permit_number),
+        notes: normalizeText(createForm.notes),
       });
       setCreateHomeownerId(null);
-      setCreateForm({ year: '', status: 'Pending', permit_number: '' });
+      setCreateForm({ year: '', status: 'Pending', permit_number: '', notes: '' });
       setCreateModalOpen(false);
       toast.success('Permit record added');
     } catch (err) {
@@ -143,6 +175,7 @@ export function ParkingPermitsView({
         year: normalizeText(editForm.year),
         status: editForm.status,
         permit_number: normalizeText(editForm.permit_number),
+        notes: normalizeText(editForm.notes),
       });
       toast.success('Permit updated');
     } catch (err) {
@@ -209,6 +242,29 @@ export function ParkingPermitsView({
     }
   };
 
+  const saveAutomobiles = async () => {
+    if (!selectedPermit) return;
+    setSavingAutomobiles(true);
+    try {
+      await onSaveAutomobiles(
+        selectedPermit.homeowner_id,
+        automobilesForm
+          .map((automobile) => ({
+            license_plate: normalizeText(automobile.license_plate),
+            make: normalizeText(automobile.make),
+            model: normalizeText(automobile.model),
+            color: normalizeText(automobile.color),
+          }))
+          .filter((automobile) => automobile.license_plate || automobile.make || automobile.model || automobile.color),
+      );
+      toast.success('Automobiles updated');
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to save automobiles');
+    } finally {
+      setSavingAutomobiles(false);
+    }
+  };
+
   return (
     <div className="homeowners-shell parking-permits-shell">
       <section className="panelish homeowners-list-panel">
@@ -269,7 +325,7 @@ export function ParkingPermitsView({
         </div>
       </section>
 
-      <section className="panelish homeowners-detail-panel">
+      <section className="panelish homeowners-detail-panel parking-permit-detail-panel">
         {!selectedPermit && !detailLoading && <div className="empty-detail">Select a permit record to view details.</div>}
         {detailLoading && <div className="empty-detail">Loading permit details…</div>}
         {selectedPermit && editForm && (
@@ -285,54 +341,102 @@ export function ParkingPermitsView({
               </div>
             </div>
 
-            <div className="detail-block form-block homeowner-section-card">
-              <div className="detail-label">Homeowner names</div>
-              <div className="chip-row compact-chips">
-                {selectedPermit.homeowner_names.length
-                  ? selectedPermit.homeowner_names.map((name, index) => <span className="mini-chip" key={`selected-owner-${index}`}>{name}</span>)
-                  : <span className="muted small-text">No homeowner names listed</span>}
-              </div>
-            </div>
+            <div className="parking-permit-detail-split">
+              <div className="parking-permit-half">
+                <div className="detail-block form-block homeowner-section-card">
+                  <div className="detail-label">Permit Detail</div>
+                  <div className="chip-row compact-chips">
+                    {selectedPermit.homeowner_names.length
+                      ? selectedPermit.homeowner_names.map((name, index) => <span className="mini-chip" key={`selected-owner-${index}`}>{name}</span>)
+                      : <span className="muted small-text">No homeowner names listed</span>}
+                  </div>
 
-            <div className="detail-block form-block homeowner-section-card">
-              <div className="detail-label">Permit fields</div>
-              <div className="form-grid two-up">
-                <label>
-                  <div className="detail-label">Year</div>
-                  <input value={editForm.year} onChange={(event) => setEditForm((prev) => (prev ? { ...prev, year: event.target.value } : prev))} />
-                </label>
-                <label>
-                  <div className="detail-label">Status</div>
-                  <select
-                    value={editForm.status}
-                    onChange={(event) => setEditForm((prev) => (prev ? { ...prev, status: event.target.value as PermitStatus } : prev))}
-                  >
-                    {permitStatusOptions.map((option) => <option value={option} key={option}>{option}</option>)}
-                  </select>
-                </label>
+                  <div className="form-grid two-up">
+                    <label>
+                      <div className="detail-label">Year</div>
+                      <input value={editForm.year} onChange={(event) => setEditForm((prev) => (prev ? { ...prev, year: event.target.value } : prev))} />
+                    </label>
+                    <label>
+                      <div className="detail-label">Status</div>
+                      <select
+                        value={editForm.status}
+                        onChange={(event) => setEditForm((prev) => (prev ? { ...prev, status: event.target.value as PermitStatus } : prev))}
+                      >
+                        {permitStatusOptions.map((option) => <option value={option} key={option}>{option}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <label>
+                    <div className="detail-label">Permit number</div>
+                    <input
+                      value={editForm.permit_number}
+                      onChange={(event) => setEditForm((prev) => (prev ? { ...prev, permit_number: event.target.value } : prev))}
+                    />
+                  </label>
+                  <label>
+                    <div className="detail-label">Permit note</div>
+                    <textarea
+                      rows={3}
+                      value={editForm.notes}
+                      onChange={(event) => setEditForm((prev) => (prev ? { ...prev, notes: event.target.value } : prev))}
+                    />
+                  </label>
+                  <div className="field-actions">
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      onClick={() => setEditForm({
+                        year: selectedPermit.year || '',
+                        status: selectedPermit.status,
+                        permit_number: selectedPermit.permit_number || '',
+                        notes: selectedPermit.notes || '',
+                      })}
+                      disabled={!selectedPermitDirty || saving}
+                    >
+                      Reset
+                    </button>
+                    <button className="primary-button" type="button" onClick={() => void savePermit()} disabled={!selectedPermitDirty || saving}>
+                      {saving ? 'Saving…' : 'Save permit'}
+                    </button>
+                    <button className="ghost-button danger-ghost" type="button" onClick={() => void deletePermit()} disabled={deleting}>
+                      {deleting ? 'Deleting…' : 'Delete permit'}
+                    </button>
+                  </div>
+                </div>
               </div>
-              <label>
-                <div className="detail-label">Permit number</div>
-                <input
-                  value={editForm.permit_number}
-                  onChange={(event) => setEditForm((prev) => (prev ? { ...prev, permit_number: event.target.value } : prev))}
+
+              <div className="parking-permit-half">
+                <EditableAutomobilesSection
+                  automobiles={automobilesForm}
+                  emptyMessage="No automobiles recorded for this unit."
+                  disabled={savingAutomobiles}
+                  onChange={setAutomobilesForm}
                 />
-              </label>
-              <div className="field-actions">
-                <button
-                  className="ghost-button"
-                  type="button"
-                  onClick={() => setEditForm({ year: selectedPermit.year || '', status: selectedPermit.status, permit_number: selectedPermit.permit_number || '' })}
-                  disabled={!selectedPermitDirty || saving}
-                >
-                  Reset
-                </button>
-                <button className="primary-button" type="button" onClick={() => void savePermit()} disabled={!selectedPermitDirty || saving}>
-                  {saving ? 'Saving…' : 'Save permit'}
-                </button>
-                <button className="ghost-button danger-ghost" type="button" onClick={() => void deletePermit()} disabled={deleting}>
-                  {deleting ? 'Deleting…' : 'Delete permit'}
-                </button>
+                <div className="field-actions automobile-actions">
+                  <button
+                    className="ghost-button"
+                    type="button"
+                    onClick={() => {
+                      setAutomobilesForm((selectedPermit.automobiles || []).map((automobile) => ({
+                        license_plate: automobile.license_plate || '',
+                        make: automobile.make || '',
+                        model: automobile.model || '',
+                        color: automobile.color || '',
+                      })));
+                    }}
+                    disabled={!selectedAutomobilesDirty || savingAutomobiles}
+                  >
+                    Reset automobiles
+                  </button>
+                  <button
+                    className="primary-button"
+                    type="button"
+                    onClick={() => void saveAutomobiles()}
+                    disabled={!selectedAutomobilesDirty || savingAutomobiles}
+                  >
+                    {savingAutomobiles ? 'Saving…' : 'Save automobiles'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -425,6 +529,14 @@ export function ParkingPermitsView({
             <label>
               <div className="detail-label">Permit number</div>
               <input value={createForm.permit_number} onChange={(event) => setCreateForm((prev) => ({ ...prev, permit_number: event.target.value }))} />
+            </label>
+            <label>
+              <div className="detail-label">Permit note</div>
+              <textarea
+                rows={3}
+                value={createForm.notes}
+                onChange={(event) => setCreateForm((prev) => ({ ...prev, notes: event.target.value }))}
+              />
             </label>
             <div className="field-actions">
               <button className="ghost-button" type="button" onClick={() => setCreateModalOpen(false)} disabled={savingCreate}>

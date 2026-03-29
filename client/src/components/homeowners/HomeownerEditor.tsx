@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import toast from 'react-hot-toast';
+import { EditableAutomobilesSection, AutomobileFormValues } from '../automobiles';
 import { HomeownerDetail, HomeownerUpdatePayload, PermitStatus } from '../../types';
 
 type HomeownerEditorProps = {
@@ -26,13 +27,7 @@ type PermitDraft = {
   year: string;
   status: PermitStatus;
   permit_number: string;
-};
-
-type AutomobileDraft = {
-  license_plate: string;
-  make: string;
-  model: string;
-  color: string;
+  notes: string;
 };
 
 type HomeownerDraft = {
@@ -42,14 +37,13 @@ type HomeownerDraft = {
   notes: string;
   contacts: ContactDraft[];
   parking_permits: PermitDraft[];
-  automobiles: AutomobileDraft[];
+  automobiles: AutomobileFormValues[];
 };
 
 const permitStatusOptions: PermitStatus[] = ['Pending', 'Approved', 'Denied'];
 
 const emptyContact = (): ContactDraft => ({ name: '', email: '', phone: '', role: '', is_board_member: false });
-const emptyPermit = (): PermitDraft => ({ year: '', status: 'Pending', permit_number: '' });
-const emptyAutomobile = (): AutomobileDraft => ({ license_plate: '', make: '', model: '', color: '' });
+const emptyPermit = (): PermitDraft => ({ year: '', status: 'Pending', permit_number: '', notes: '' });
 
 function buildDraft(detail: HomeownerDetail | null): HomeownerDraft | null {
   if (!detail) return null;
@@ -70,6 +64,7 @@ function buildDraft(detail: HomeownerDetail | null): HomeownerDraft | null {
       year: permit.year || '',
       status: permitStatusOptions.includes(permit.status) ? permit.status : 'Pending',
       permit_number: permit.permit_number || '',
+      notes: permit.notes || '',
     })),
     automobiles: detail.automobiles.map((automobile) => ({
       license_plate: automobile.license_plate || '',
@@ -187,15 +182,6 @@ export function HomeownerEditor({
     });
   };
 
-  const updateAutomobile = (index: number, patch: Partial<AutomobileDraft>) => {
-    setDraft((prev) => {
-      if (!prev) return prev;
-      const next = [...prev.automobiles];
-      next[index] = { ...next[index], ...patch };
-      return { ...prev, automobiles: next };
-    });
-  };
-
   const reset = () => {
     setDraft(buildDraft(detail));
     setSaveError(null);
@@ -227,6 +213,7 @@ export function HomeownerEditor({
         year: normalizeText(permit.year),
         status: permit.status,
         permit_number: normalizeText(permit.permit_number),
+        notes: normalizeText(permit.notes),
       }))
       .filter((permit) => permit.id || permit.year || permit.permit_number);
 
@@ -513,6 +500,14 @@ export function HomeownerEditor({
                         onChange={(event) => updatePermit(index, { permit_number: event.target.value })}
                       />
                     </label>
+                    <label>
+                      <div className="detail-label">Permit note</div>
+                      <textarea
+                        rows={3}
+                        value={permit.notes}
+                        onChange={(event) => updatePermit(index, { notes: event.target.value })}
+                      />
+                    </label>
 
                     {permit.id ? (
                       <div className="permit-docs-wrap">
@@ -610,68 +605,11 @@ export function HomeownerEditor({
           )}
         </div>
 
-        <div className="detail-block form-block homeowner-section-card">
-          <div className="detail-header-row">
-            <div className="detail-label">Automobiles ({draft.automobiles.length})</div>
-            <button
-              type="button"
-              className="ghost-button"
-              onClick={() => setDraft((prev) => (prev ? { ...prev, automobiles: [...prev.automobiles, emptyAutomobile()] } : prev))}
-            >
-              + Add automobile
-            </button>
-          </div>
-          {draft.automobiles.length ? (
-            <div className="homeowner-sublist">
-              {draft.automobiles.map((automobile, index) => (
-                <div className="homeowner-sub-card" key={`auto-${index}`}>
-                  <div className="homeowner-sub-title">Automobile {index + 1}</div>
-                  <div className="form-grid two-up">
-                    <label>
-                      <div className="detail-label">License plate</div>
-                      <input value={automobile.license_plate} onChange={(event) => updateAutomobile(index, { license_plate: event.target.value })} />
-                    </label>
-                    <label>
-                      <div className="detail-label">Color</div>
-                      <input value={automobile.color} onChange={(event) => updateAutomobile(index, { color: event.target.value })} />
-                    </label>
-                  </div>
-                  <div className="form-grid two-up">
-                    <label>
-                      <div className="detail-label">Make</div>
-                      <input value={automobile.make} onChange={(event) => updateAutomobile(index, { make: event.target.value })} />
-                    </label>
-                    <label>
-                      <div className="detail-label">Model</div>
-                      <input value={automobile.model} onChange={(event) => updateAutomobile(index, { model: event.target.value })} />
-                    </label>
-                  </div>
-                  <div className="homeowner-row-actions">
-                    <div />
-                    <button
-                      type="button"
-                      className="ghost-button danger-ghost"
-                      onClick={() => setDraft((prev) => (prev ? { ...prev, automobiles: prev.automobiles.filter((_, idx) => idx !== index) } : prev))}
-                    >
-                      Remove row
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="empty-lane homeowner-empty-inline">
-              No automobile records.
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setDraft((prev) => (prev ? { ...prev, automobiles: [...prev.automobiles, emptyAutomobile()] } : prev))}
-              >
-                Add first automobile
-              </button>
-            </div>
-          )}
-        </div>
+        <EditableAutomobilesSection
+          automobiles={draft.automobiles}
+          onChange={(automobiles) => setDraft((prev) => (prev ? { ...prev, automobiles } : prev))}
+          disabled={saving}
+        />
 
         {validationErrors.length > 0 && (
           <div className="error-banner">

@@ -99,6 +99,7 @@ export type HomeownerParkingPermit = {
   year?: string | null;
   status: 'Pending' | 'Approved' | 'Denied';
   permit_number?: string | null;
+  notes?: string | null;
   documents: DocumentRecord[];
 };
 
@@ -130,6 +131,7 @@ export type HomeownerUpdateParkingPermit = {
   year?: string | null;
   status?: 'Pending' | 'Approved' | 'Denied' | null;
   permit_number?: string | null;
+  notes?: string | null;
 };
 
 export type HomeownerUpdateAutomobile = {
@@ -171,6 +173,7 @@ export type ParkingPermitSummary = {
   year?: string | null;
   status: PermitStatus;
   permit_number?: string | null;
+  notes?: string | null;
   unit_display: string;
   account_number: string;
   homeowner_names: string[];
@@ -181,4 +184,5 @@ export type ParkingPermitSummary = {
 
 export type ParkingPermitDetail = ParkingPermitSummary & {
   documents: DocumentRecord[];
+  automobiles: HomeownerAutomobile[];
 };
