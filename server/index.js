@@ -294,7 +294,10 @@ function toIntBoolean(value) {
 
 seedMeetings();
 seedFromLegacyJson();
-normalizeSortOrder();
+const needsSortNormalization = db.prepare('SELECT 1 AS needs FROM agenda_items WHERE sort_order = 0 LIMIT 1').get();
+if (needsSortNormalization) {
+  normalizeSortOrder();
+}
 
 function loadToken() {
   if (!fs.existsSync(TOKEN_PATH)) throw new Error(`Missing Graph token file at ${TOKEN_PATH}`);
@@ -1009,7 +1012,7 @@ function mountApi(prefix = '') {
       updated.description || null,
       updated.category || null,
       updated.priority || null,
-      updated.sort_order || existing.sort_order || nextSortOrder(),
+      updated.sort_order ?? existing.sort_order ?? nextSortOrder(),
       updated.kind,
       updated.status,
       updated.meeting_intent || null,
@@ -1036,10 +1039,9 @@ function mountApi(prefix = '') {
     const body = req.body || {};
     const itemIds = Array.isArray(body.itemIds) ? body.itemIds.filter(Boolean) : [];
     if (!itemIds.length) return res.status(400).json({ error: 'itemIds is required' });
-    const update = db.prepare('UPDATE agenda_items SET sort_order = ?, updated_at = ? WHERE id = ?');
-    const timestamp = nowIso();
+    const update = db.prepare('UPDATE agenda_items SET sort_order = ? WHERE id = ?');
     const tx = db.transaction((ids) => {
-      ids.forEach((id, index) => update.run(index + 1, timestamp, id));
+      ids.forEach((id, index) => update.run(index + 1, id));
     });
     tx(itemIds);
     res.json({ ok: true, itemIds });
