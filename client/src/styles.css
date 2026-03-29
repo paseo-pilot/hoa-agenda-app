@@ -27,6 +27,11 @@ input, textarea, select {
   color: var(--text);
   padding: 12px 14px;
 }
+input[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+  border-color: rgba(255, 122, 144, 0.75);
+  box-shadow: 0 0 0 2px rgba(255, 122, 144, 0.14);
+}
 textarea { resize: vertical; }
 
 .loading-screen { min-height: 100vh; display: grid; place-items: center; color: var(--muted); }
@@ -63,6 +68,7 @@ h1, h2, h3 { margin: 0; }
 .topbar, .lane-header, .detail-header-row, .issue-meta-row, .issue-chip-row, .chip-row, .field-actions, .topbar-actions {
   display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between;
 }
+.topbar-actions-full { width: 100%; }
 .issue-title { margin-top: 6px; font-size: 15px; font-weight: 650; }
 .issue-subtitle { margin-top: 6px; color: var(--muted); font-size: 13px; line-height: 1.4; }
 .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--muted); }
@@ -72,6 +78,10 @@ h1, h2, h3 { margin: 0; }
 .chip, .mini-chip { background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border); border-radius: 999px; }
 .chip { padding: 7px 10px; font-size: 12px; }
 .mini-chip { padding: 4px 8px; font-size: 12px; }
+.chip-warning {
+  border-color: rgba(245, 196, 81, 0.45);
+  background: rgba(245, 196, 81, 0.12);
+}
 .detail-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
 .form-grid { display: grid; gap: 10px; }
 .form-grid.two-up { grid-template-columns: 1fr 1fr; }
@@ -84,6 +94,138 @@ h1, h2, h3 { margin: 0; }
 .issue-card.dragging { opacity: 0.55; border-color: rgba(124,147,255,0.8); }
 .drag-handle-row { display: flex; align-items: center; gap: 8px; }
 .drag-grip { color: var(--muted); font-size: 14px; letter-spacing: -1px; }
+.document-card {
+  min-width: 0;
+  overflow: hidden;
+}
+.document-meta-line,
+.document-title {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.document-action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-header-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 12px 12px 0;
+}
+.app-header {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.app-header-title {
+  display: grid;
+  gap: 2px;
+}
+.app-header-title h2 {
+  font-size: 20px;
+}
+.app-header-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-header-actions:empty {
+  display: none;
+}
+.homeowner-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.menu-button {
+  width: 42px;
+  height: 42px;
+  padding: 10px 9px;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: stretch;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+}
+.menu-button:hover {
+  border-color: rgba(124,147,255,.6);
+}
+.menu-button span {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--text);
+}
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+  z-index: 30;
+}
+.drawer-backdrop.open {
+  opacity: 1;
+  pointer-events: auto;
+}
+.module-drawer {
+  width: min(82vw, 320px);
+  height: 100%;
+  border-radius: 0;
+  border-left: none;
+  transform: translateX(-100%);
+  transition: transform 160ms ease;
+  padding: 14px;
+}
+.module-drawer.open {
+  transform: translateX(0);
+}
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.drawer-close {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  cursor: pointer;
+}
+.drawer-nav {
+  display: grid;
+  gap: 8px;
+}
+.drawer-module-button {
+  min-height: 44px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--muted);
+  cursor: pointer;
+}
+.drawer-module-button.active {
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(124,147,255,.25), rgba(167,139,250,.2));
+  border-color: rgba(124,147,255,.6);
+}
 
 .desktop-only { display: none; }
 .mobile-only { display: block; }
@@ -104,10 +246,11 @@ h1, h2, h3 { margin: 0; }
 .mobile-item-title { margin-top: 4px; font-size: 22px; line-height: 1.2; }
 
 .desktop-shell {
-  min-height: 100vh; display: grid; grid-template-columns: 320px 1fr 380px; gap: 16px; padding: 16px;
+  min-height: 100vh; display: grid; grid-template-columns: 300px minmax(0, 1fr) minmax(420px, 1.1fr); gap: 16px; padding: 16px;
 }
 .sidebar, .main-panel, .detail-panel { padding: 18px; }
-.main-panel { display: flex; flex-direction: column; gap: 18px; }
+.main-panel { display: flex; flex-direction: column; gap: 18px; min-width: 0; overflow-x: hidden; }
+.detail-panel { min-width: 0; overflow-x: hidden; }
 .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
 .sidebar-section { display: grid; gap: 10px; }
 .form-section { margin-top: 8px; }
@@ -117,6 +260,307 @@ h1, h2, h3 { margin: 0; }
 .detail-block { background: var(--panel-2); border: 1px solid var(--border); border-radius: 16px; padding: 14px; display: grid; gap: 10px; }
 .detail-footer { margin-top: auto; font-size: 12px; color: var(--muted); }
 
+.homeowners-page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 16px;
+  height: calc(100dvh - 84px);
+  overflow: hidden;
+}
+
+.board-members-panel {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+.board-members-empty {
+  text-align: left;
+  place-items: start;
+}
+.board-members-list {
+  display: grid;
+  gap: 10px;
+}
+.board-member-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel-2);
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+.board-member-contact-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.homeowners-shell {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(320px, 420px) 1fr;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
+}
+.homeowners-list-panel,
+.homeowners-detail-panel {
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  align-content: start;
+  min-height: 0;
+}
+.homeowners-list-panel {
+  grid-template-rows: auto auto auto 1fr;
+  overflow: hidden;
+}
+.homeowners-detail-panel {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 16px;
+}
+.homeowners-toolbar {
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  align-items: center;
+}
+.homeowners-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  grid-auto-rows: max-content;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+.homeowner-list-row {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  border-radius: 14px;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+}
+.homeowner-list-row.active,
+.homeowner-list-row:hover {
+  border-color: rgba(124,147,255,0.5);
+}
+.homeowner-list-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.homeowner-unit {
+  font-weight: 700;
+}
+.homeowner-account {
+  color: var(--muted);
+  font-size: 12px;
+}
+.compact-chips {
+  justify-content: flex-start;
+}
+.homeowner-contact-row {
+  min-height: 24px;
+}
+.homeowner-sublist {
+  display: grid;
+  gap: 8px;
+}
+.homeowner-sub-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.homeowner-sub-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.chip-rental {
+  border-color: rgba(245, 196, 81, 0.4);
+}
+.homeowner-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.homeowner-toggle input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.homeowner-row-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.homeowner-section-card {
+  border-radius: 14px;
+}
+.homeowner-empty-inline {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+.danger-ghost {
+  border-color: rgba(255, 122, 144, 0.35);
+  color: #ffd2d9;
+}
+.homeowner-validation-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.homeowner-validation-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+.permit-docs-wrap {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+.parking-permits-shell .homeowners-list-panel {
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+}
+.parking-permit-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.parking-permit-list {
+  gap: 0;
+}
+.parking-permit-table-header,
+.parking-permit-table-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.parking-permit-table-header {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-top-left-radius: 12px;
+  border-top-right-radius: 12px;
+}
+.parking-permit-table-body {
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.parking-permit-table-grid {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  grid-template-columns: minmax(90px, 1fr) minmax(180px, 1.8fr) minmax(62px, 0.65fr) minmax(90px, 0.85fr) minmax(120px, 1fr) 56px;
+}
+.parking-permit-table-row {
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  cursor: pointer;
+}
+.parking-permit-table-row:last-child {
+  border-bottom: none;
+}
+.parking-permit-table-row:hover,
+.parking-permit-table-row.active {
+  background: rgba(124, 147, 255, 0.12);
+}
+.parking-permit-cell {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+}
+.parking-permit-cell .mini-chip {
+  vertical-align: middle;
+}
+.parking-permit-cell.unit-cell {
+  color: var(--text);
+  font-weight: 600;
+}
+.app-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(3, 6, 12, 0.7);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.app-modal-card {
+  width: min(640px, 100%);
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+.permit-create-modal {
+  background: rgba(16, 19, 26, 0.97);
+}
+@media (max-width: 1200px) {
+  .parking-permit-table-grid {
+    grid-template-columns: minmax(80px, 0.8fr) minmax(140px, 1.4fr) minmax(56px, 0.55fr) minmax(82px, 0.8fr) minmax(90px, 0.9fr) 50px;
+  }
+}
+@media (max-width: 760px) {
+  .parking-permit-toolbar-actions {
+    width: 100%;
+  }
+  .parking-permit-toolbar-actions button {
+    flex: 1;
+  }
+  .parking-permit-table-header {
+    display: none;
+  }
+  .parking-permit-table-body {
+    border-radius: 12px;
+  }
+  .parking-permit-table-row {
+    border-bottom: 1px solid var(--border);
+    padding: 12px;
+  }
+  .parking-permit-table-row:last-child {
+    border-bottom: none;
+  }
+  .parking-permit-table-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+  }
+  .parking-permit-cell::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10px;
+  }
+}
 @media (min-width: 900px) {
   .desktop-only { display: block; }
   .mobile-only { display: none; }
@@ -131,4 +575,32 @@ h1, h2, h3 { margin: 0; }
 @media (max-width: 520px) {
   .stats-grid.compact, .quick-actions-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .form-grid.two-up { grid-template-columns: 1fr; }
+  .board-member-contact-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 1000px) {
+  .app-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .app-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .homeowners-page {
+    height: auto;
+    overflow: visible;
+  }
+  .homeowners-shell {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+  .homeowners-list {
+    max-height: 280px;
+  }
+  .homeowners-detail-panel {
+    height: auto;
+    overflow: visible;
+    padding-bottom: 16px;
+  }
 }

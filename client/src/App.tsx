@@ -1,102 +1,23 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-
-type Meeting = {
-  id: string;
-  title: string;
-  meeting_date: string;
-  cadence_note?: string | null;
-  status: string;
-};
-
-type DocumentRecord = {
-  id: string;
-  title: string;
-  source_type: string;
-  sharepoint_item_id?: string | null;
-  sharepoint_web_url?: string | null;
-  sharepoint_path?: string | null;
-  mime_type?: string | null;
-  notes?: string | null;
-  relation_type?: string | null;
-  updated_at: string;
-};
-
-type AgendaItem = {
-  id: string;
-  title: string;
-  description?: string | null;
-  category?: string | null;
-  priority?: string | null;
-  sort_order?: number;
-  kind: string;
-  status: string;
-  meeting_intent?: string | null;
-  target_meeting_id?: string | null;
-  target_meeting_title?: string | null;
-  owner?: string | null;
-  decision_needed?: string | null;
-  next_action?: string | null;
-  notes: string[];
-  documents?: DocumentRecord[];
-  updated_at: string;
-};
-
-type DraftItem = {
-  title: string;
-  description: string;
-  category: string;
-  priority: string;
-  kind: string;
-  status: string;
-  meeting_intent: string;
-  target_meeting_id: string;
-  owner: string;
-  decision_needed: string;
-  next_action: string;
-  notesText: string;
-};
-
-type MobileTab = 'board' | 'item' | 'add';
-
-const statusLabel: Record<string, string> = {
-  pending_info: 'Pending info',
-  todo: 'To-do',
-  ready: 'Ready',
-  scheduled: 'Scheduled',
-  follow_up: 'Follow-up',
-  completed: 'Completed',
-  backlog: 'Backlog',
-};
-
-const meetingIntentLabel: Record<string, string> = {
-  next_meeting: 'Next meeting',
-  next_meeting_if_ready: 'Next if ready',
-  future: 'Future meeting',
-  unscheduled: 'Unscheduled',
-};
-
-const statusOptions = ['pending_info', 'todo', 'ready', 'scheduled', 'follow_up', 'completed', 'backlog'];
-const kindOptions = [
-  { value: 'agenda_candidate', label: 'Agenda candidate' },
-  { value: 'task', label: 'Board to-do' },
-];
-const meetingIntentOptions = ['next_meeting', 'next_meeting_if_ready', 'future', 'unscheduled'];
-const priorityOptions = ['high', 'medium', 'low'];
-
-const emptyDraft: DraftItem = {
-  title: '',
-  description: '',
-  category: '',
-  priority: 'medium',
-  kind: 'task',
-  status: 'todo',
-  meeting_intent: 'unscheduled',
-  target_meeting_id: '',
-  owner: '',
-  decision_needed: '',
-  next_action: '',
-  notesText: '',
-};
+import { emptyDraft } from './constants';
+import { DesktopAgendaShell, MobileAgendaShell } from './components/AgendaShell';
+import { BoardMembersView } from './components/BoardMembersView';
+import { HomeownersView } from './components/HomeownersView';
+import { ParkingPermitsView } from './components/ParkingPermitsView';
+import {
+  AgendaGroups,
+  AgendaItem,
+  BoardMember,
+  DraftItem,
+  HomeownerDetail,
+  HomeownerSummary,
+  HomeownerUpdatePayload,
+  Meeting,
+  MobileTab,
+  ParkingPermitDetail,
+  ParkingPermitSummary,
+  PermitStatus,
+} from './types';
 
 function App() {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -107,15 +28,39 @@ function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [linkingDocument, setLinkingDocument] = useState(false);
   const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [removingDocumentId, setRemovingDocumentId] = useState<string | null>(null);
   const [mobileTab, setMobileTab] = useState<MobileTab>('board');
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
   const [draft, setDraft] = useState<DraftItem>(emptyDraft);
-  const [docDraft, setDocDraft] = useState({ title: '', webUrl: '', path: '', notes: '' });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadTitle, setUploadTitle] = useState('');
   const [uploadNotes, setUploadNotes] = useState('');
+
+  const [activeModule, setActiveModule] = useState<'agenda' | 'homeowners' | 'parking-permits' | 'board-members'>('agenda');
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [homeowners, setHomeowners] = useState<HomeownerSummary[]>([]);
+  const [homeownerQuery, setHomeownerQuery] = useState('');
+  const [homeownersLoading, setHomeownersLoading] = useState(false);
+  const [homeownersDetailLoading, setHomeownersDetailLoading] = useState(false);
+  const [homeownersSaving, setHomeownersSaving] = useState(false);
+  const [homeownersError, setHomeownersError] = useState<string | null>(null);
+  const [selectedHomeownerId, setSelectedHomeownerId] = useState<number | null>(null);
+  const [selectedHomeowner, setSelectedHomeowner] = useState<HomeownerDetail | null>(null);
+  const [boardMembers, setBoardMembers] = useState<BoardMember[]>([]);
+  const [boardMembersLoading, setBoardMembersLoading] = useState(false);
+  const [boardMembersError, setBoardMembersError] = useState<string | null>(null);
+  const [parkingPermits, setParkingPermits] = useState<ParkingPermitSummary[]>([]);
+  const [parkingPermitYears, setParkingPermitYears] = useState<string[]>([]);
+  const [selectedPermitYear, setSelectedPermitYear] = useState('');
+  const [parkingPermitsLoading, setParkingPermitsLoading] = useState(false);
+  const [parkingPermitDetailLoading, setParkingPermitDetailLoading] = useState(false);
+  const [parkingPermitSaving, setParkingPermitSaving] = useState(false);
+  const [parkingPermitDeleting, setParkingPermitDeleting] = useState(false);
+  const [parkingPermitsError, setParkingPermitsError] = useState<string | null>(null);
+  const [selectedParkingPermitId, setSelectedParkingPermitId] = useState<number | null>(null);
+  const [selectedParkingPermit, setSelectedParkingPermit] = useState<ParkingPermitDetail | null>(null);
+
   const apiBase = `${import.meta.env.BASE_URL}api`;
 
   const loadData = async () => {
@@ -135,18 +80,231 @@ function App() {
     }
   };
 
+  const loadHomeowners = async (query = homeownerQuery) => {
+    try {
+      setHomeownersLoading(true);
+      setHomeownersError(null);
+      const params = new URLSearchParams();
+      if (query.trim()) params.set('q', query.trim());
+      const url = params.toString() ? `${apiBase}/homeowners?${params.toString()}` : `${apiBase}/homeowners`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to load homeowners');
+      const data = (await res.json()) as HomeownerSummary[];
+      setHomeowners(data);
+      setSelectedHomeownerId((prev) => {
+        if (!data.length) return null;
+        if (prev && data.some((row) => row.id === prev)) return prev;
+        return data[0].id;
+      });
+    } catch (err) {
+      setHomeownersError((err as Error).message);
+    } finally {
+      setHomeownersLoading(false);
+    }
+  };
+
+  const refreshHomeownerDetail = async (homeownerId: number) => {
+    const res = await fetch(`${apiBase}/homeowners/${homeownerId}`);
+    if (!res.ok) throw new Error('Failed to load homeowner details');
+    const detail = (await res.json()) as HomeownerDetail;
+    setSelectedHomeowner(detail);
+    return detail;
+  };
+
+  const saveHomeowner = async (homeownerId: number, payload: HomeownerUpdatePayload) => {
+    setHomeownersSaving(true);
+    setHomeownersError(null);
+    try {
+      const res = await fetch(`${apiBase}/homeowners/${homeownerId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update homeowner');
+
+      const updated = data as HomeownerDetail;
+      setSelectedHomeowner(updated);
+      setHomeowners((prev) => prev.map((row) => (
+        row.id === updated.id
+          ? {
+            ...row,
+            mailing_address: updated.mailing_address,
+            is_rental: updated.is_rental,
+            source_email: updated.source_email,
+            notes: updated.notes,
+            contact_count: updated.contacts.length,
+            permit_count: updated.parking_permits.length,
+            automobile_count: updated.automobiles.length,
+            updated_at: updated.updated_at,
+          }
+          : row
+      )));
+      void loadBoardMembers();
+    } catch (err) {
+      setHomeownersError((err as Error).message);
+      throw err;
+    } finally {
+      setHomeownersSaving(false);
+    }
+  };
+
+  const loadBoardMembers = async () => {
+    try {
+      setBoardMembersLoading(true);
+      setBoardMembersError(null);
+      const res = await fetch(`${apiBase}/board-members`);
+      if (!res.ok) throw new Error('Failed to load board members');
+      const data = (await res.json()) as BoardMember[];
+      setBoardMembers(data);
+    } catch (err) {
+      setBoardMembersError((err as Error).message);
+    } finally {
+      setBoardMembersLoading(false);
+    }
+  };
+
+  const loadParkingPermitYears = async () => {
+    const res = await fetch(`${apiBase}/parking-permits/years`);
+    if (!res.ok) throw new Error('Failed to load permit years');
+    const years = (await res.json()) as string[];
+    setParkingPermitYears(years);
+    return years;
+  };
+
+  const loadParkingPermits = async (year = selectedPermitYear) => {
+    try {
+      setParkingPermitsLoading(true);
+      setParkingPermitsError(null);
+      const params = new URLSearchParams();
+      if (year.trim()) params.set('year', year.trim());
+      const url = params.toString() ? `${apiBase}/parking-permits?${params.toString()}` : `${apiBase}/parking-permits`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to load parking permits');
+      const data = (await res.json()) as ParkingPermitSummary[];
+      setParkingPermits(data);
+      setSelectedParkingPermitId((prev) => {
+        if (!data.length) return null;
+        if (prev && data.some((row) => row.id === prev)) return prev;
+        return data[0].id;
+      });
+    } catch (err) {
+      setParkingPermitsError((err as Error).message);
+    } finally {
+      setParkingPermitsLoading(false);
+    }
+  };
+
+  const refreshSelectedParkingPermit = async (permitId: number) => {
+    const res = await fetch(`${apiBase}/parking-permits/${permitId}`);
+    if (!res.ok) throw new Error('Failed to load permit details');
+    const detail = (await res.json()) as ParkingPermitDetail;
+    setSelectedParkingPermit(detail);
+    return detail;
+  };
+
   useEffect(() => {
     void loadData();
   }, []);
 
-  const grouped = useMemo(() => ({
+  useEffect(() => {
+    if (!isDrawerOpen) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsDrawerOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    document.body.style.overflow = isDrawerOpen ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void loadHomeowners(homeownerQuery);
+    }, 180);
+    return () => window.clearTimeout(timeout);
+  }, [homeownerQuery]);
+
+  useEffect(() => {
+    void loadBoardMembers();
+  }, []);
+
+  useEffect(() => {
+    if (selectedHomeownerId == null) {
+      setSelectedHomeowner(null);
+      return;
+    }
+    let cancelled = false;
+    const loadDetail = async () => {
+      try {
+        setHomeownersDetailLoading(true);
+        const res = await fetch(`${apiBase}/homeowners/${selectedHomeownerId}`);
+        if (!res.ok) throw new Error('Failed to load homeowner details');
+        const detail = (await res.json()) as HomeownerDetail;
+        if (!cancelled) setSelectedHomeowner(detail);
+      } catch (err) {
+        if (!cancelled) setHomeownersError((err as Error).message);
+      } finally {
+        if (!cancelled) setHomeownersDetailLoading(false);
+      }
+    };
+    void loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBase, selectedHomeownerId]);
+
+  useEffect(() => {
+    void loadParkingPermitYears().catch((err) => setParkingPermitsError((err as Error).message));
+  }, []);
+
+  useEffect(() => {
+    void loadParkingPermits(selectedPermitYear);
+  }, [selectedPermitYear]);
+
+  useEffect(() => {
+    if (selectedParkingPermitId == null) {
+      setSelectedParkingPermit(null);
+      return;
+    }
+    let cancelled = false;
+    const loadDetail = async () => {
+      try {
+        setParkingPermitDetailLoading(true);
+        const res = await fetch(`${apiBase}/parking-permits/${selectedParkingPermitId}`);
+        if (!res.ok) throw new Error('Failed to load permit details');
+        const detail = (await res.json()) as ParkingPermitDetail;
+        if (!cancelled) setSelectedParkingPermit(detail);
+      } catch (err) {
+        if (!cancelled) setParkingPermitsError((err as Error).message);
+      } finally {
+        if (!cancelled) setParkingPermitDetailLoading(false);
+      }
+    };
+    void loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedParkingPermitId]);
+
+  const grouped: AgendaGroups = useMemo(() => ({
     nextMeeting: items.filter((item) => item.status !== 'completed' && (item.meeting_intent === 'next_meeting' || item.meeting_intent === 'next_meeting_if_ready')),
     todos: items.filter((item) => item.status !== 'completed' && item.kind === 'task' && item.meeting_intent !== 'future'),
     future: items.filter((item) => item.status !== 'completed' && item.meeting_intent === 'future'),
     completed: items.filter((item) => item.status === 'completed'),
   }), [items]);
 
-  const selectedItem = items.find((item) => item.id === selectedItemId) ?? grouped.nextMeeting[0] ?? grouped.todos[0] ?? grouped.future[0] ?? grouped.completed[0] ?? null;
+  const selectedItem = items.find((item) => item.id === selectedItemId)
+    ?? grouped.nextMeeting[0]
+    ?? grouped.todos[0]
+    ?? grouped.future[0]
+    ?? grouped.completed[0]
+    ?? null;
 
   const stats = [
     { label: 'Total', value: items.length },
@@ -162,6 +320,13 @@ function App() {
     setItems((prev) => prev.map((item) => (item.id === fresh.id ? fresh : item)));
     return fresh as AgendaItem;
   };
+
+  useEffect(() => {
+    if (!selectedItemId) return;
+    void refreshSelectedItem(selectedItemId).catch(() => {
+      // Non-fatal: keep list data visible even if detail hydration fails.
+    });
+  }, [selectedItemId]);
 
   const updateSelectedItem = async (patch: Partial<AgendaItem>, historyNote: string) => {
     if (!selectedItem) return;
@@ -220,33 +385,6 @@ function App() {
     }
   };
 
-  const linkSharePointDocument = async () => {
-    if (!selectedItem || !docDraft.title.trim() || !docDraft.webUrl.trim()) return;
-    setLinkingDocument(true);
-    try {
-      const res = await fetch(`${apiBase}/sharepoint/link`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          item_id: selectedItem.id,
-          title: docDraft.title.trim(),
-          web_url: docDraft.webUrl.trim(),
-          sharepoint_path: docDraft.path.trim() || null,
-          notes: docDraft.notes.trim() || null,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to link document');
-      await refreshSelectedItem(selectedItem.id);
-      setDocDraft({ title: '', webUrl: '', path: docDraft.path, notes: '' });
-      setNotice(`Linked SharePoint document to ${selectedItem.title}`);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLinkingDocument(false);
-    }
-  };
-
   const uploadDocument = async () => {
     if (!selectedItem || !uploadFile) return;
     setUploadingDocument(true);
@@ -271,13 +409,14 @@ function App() {
           content_base64: contentBase64,
         }),
       });
-      const data = await res.json();
+      const contentType = res.headers.get('content-type') || '';
+      const data = contentType.includes('application/json') ? await res.json() : { error: await res.text() };
       if (!res.ok) throw new Error(data.error || 'Failed to upload document');
       await refreshSelectedItem(selectedItem.id);
       setUploadFile(null);
       setUploadTitle('');
       setUploadNotes('');
-      setNotice(`Uploaded ${uploadFile.name} to SharePoint`);
+      setNotice(`Uploaded ${uploadFile.name}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -285,7 +424,138 @@ function App() {
     }
   };
 
-  const reorderItems = async (laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed', draggedId: string, targetId: string) => {
+  const removeDocument = async (documentId: string) => {
+    if (!selectedItem) return;
+    setRemovingDocumentId(documentId);
+    try {
+      const res = await fetch(`${apiBase}/items/${selectedItem.id}/documents/${documentId}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to remove document');
+      await refreshSelectedItem(selectedItem.id);
+      setNotice('Removed document from agenda item');
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRemovingDocumentId(null);
+    }
+  };
+
+  const createParkingPermit = async (payload: { homeowner_id: number; year?: string | null; status?: PermitStatus | null; permit_number?: string | null }) => {
+    setParkingPermitsError(null);
+    const res = await fetch(`${apiBase}/homeowners/${payload.homeowner_id}/parking-permits`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        year: payload.year,
+        status: payload.status || 'Pending',
+        permit_number: payload.permit_number,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to create permit');
+    const created = data as ParkingPermitDetail;
+    setSelectedParkingPermitId(created.id);
+    await Promise.all([
+      loadParkingPermits(selectedPermitYear),
+      loadParkingPermitYears(),
+      loadHomeowners(homeownerQuery),
+    ]);
+  };
+
+  const saveParkingPermit = async (permitId: number, payload: { year?: string | null; status?: PermitStatus | null; permit_number?: string | null }) => {
+    setParkingPermitSaving(true);
+    setParkingPermitsError(null);
+    try {
+      const res = await fetch(`${apiBase}/parking-permits/${permitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update permit');
+      const updated = data as ParkingPermitDetail;
+      setSelectedParkingPermit(updated);
+      setParkingPermits((prev) => prev.map((permit) => (permit.id === updated.id
+        ? {
+          ...permit,
+          year: updated.year,
+          status: updated.status,
+          permit_number: updated.permit_number,
+          homeowner_names: updated.homeowner_names,
+          updated_at: updated.updated_at,
+          document_count: updated.documents.length,
+        }
+        : permit)));
+      await Promise.all([
+        loadParkingPermitYears(),
+        loadHomeowners(homeownerQuery),
+      ]);
+    } catch (err) {
+      setParkingPermitsError((err as Error).message);
+      throw err;
+    } finally {
+      setParkingPermitSaving(false);
+    }
+  };
+
+  const deleteParkingPermit = async (permitId: number) => {
+    setParkingPermitDeleting(true);
+    setParkingPermitsError(null);
+    try {
+      const res = await fetch(`${apiBase}/parking-permits/${permitId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete permit');
+      setParkingPermits((prev) => {
+        const next = prev.filter((permit) => permit.id !== permitId);
+        setSelectedParkingPermitId(next.length ? next[0].id : null);
+        return next;
+      });
+      await Promise.all([
+        loadParkingPermitYears(),
+        loadHomeowners(homeownerQuery),
+      ]);
+    } catch (err) {
+      setParkingPermitsError((err as Error).message);
+      throw err;
+    } finally {
+      setParkingPermitDeleting(false);
+    }
+  };
+
+  const uploadPermitDocument = async (permitId: number, payload: { filename: string; document_title?: string | null; notes?: string | null; mime_type?: string | null; content_base64: string }) => {
+    setParkingPermitsError(null);
+    const res = await fetch(`${apiBase}/parking-permits/${permitId}/sharepoint/upload`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const contentType = res.headers.get('content-type') || '';
+    const data = contentType.includes('application/json') ? await res.json() : { error: await res.text() };
+    if (!res.ok) throw new Error(data.error || 'Failed to upload permit document');
+    await loadParkingPermits(selectedPermitYear);
+    if (selectedParkingPermitId != null) {
+      await refreshSelectedParkingPermit(selectedParkingPermitId);
+    }
+    if (selectedHomeownerId != null) await refreshHomeownerDetail(selectedHomeownerId);
+  };
+
+  const removePermitDocument = async (permitId: number, documentId: string) => {
+    setParkingPermitsError(null);
+    const res = await fetch(`${apiBase}/parking-permits/${permitId}/documents/${documentId}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to remove permit document');
+    await loadParkingPermits(selectedPermitYear);
+    if (selectedParkingPermitId != null) {
+      await refreshSelectedParkingPermit(selectedParkingPermitId);
+    }
+    if (selectedHomeownerId != null) await refreshHomeownerDetail(selectedHomeownerId);
+  };
+
+  const reorderItems = async (laneKey: keyof AgendaGroups, draggedId: string, targetId: string) => {
     if (draggedId === targetId) return;
     const laneItems = [...grouped[laneKey]];
     const fromIndex = laneItems.findIndex((item) => item.id === draggedId);
@@ -302,7 +572,10 @@ function App() {
     const orderedIds = [...nextMeetingIds, ...todoIds, ...futureIds, ...completedIds];
 
     const sortMap = new Map(orderedIds.map((id, index) => [id, index + 1]));
-    setItems((prev) => [...prev].sort((a, b) => (sortMap.get(a.id) || 999999) - (sortMap.get(b.id) || 999999)).map((item) => ({ ...item, sort_order: sortMap.get(item.id) || item.sort_order || 0 })));
+    setItems((prev) => [...prev]
+      .sort((a, b) => (sortMap.get(a.id) || 999999) - (sortMap.get(b.id) || 999999))
+      .map((item) => ({ ...item, sort_order: sortMap.get(item.id) || item.sort_order || 0 })));
+
     try {
       const res = await fetch(`${apiBase}/items/reorder`, {
         method: 'POST',
@@ -322,534 +595,228 @@ function App() {
     setMobileTab('item');
   };
 
+  const handleModuleChange = (module: 'agenda' | 'homeowners' | 'parking-permits' | 'board-members') => {
+    setActiveModule(module);
+    setIsDrawerOpen(false);
+  };
+
   if (loading) return <div className="loading-screen">Loading HOA agenda app…</div>;
   if (error && !items.length) return <div className="loading-screen error">{error}</div>;
 
   return (
     <>
-      <div className="desktop-only">
-        <DesktopShell
-          meetings={meetings}
-          grouped={grouped}
-          selectedItem={selectedItem}
-          selectedItemId={selectedItemId}
-          setSelectedItemId={setSelectedItemId}
-          draggedItemId={draggedItemId}
-          setDraggedItemId={setDraggedItemId}
-          reorderItems={reorderItems}
-          stats={stats}
-          error={error}
-          notice={notice}
-          loadData={loadData}
-          saving={saving}
-          draft={draft}
-          setDraft={setDraft}
-          createItem={createItem}
-          creating={creating}
-          updateSelectedItem={updateSelectedItem}
-          docDraft={docDraft}
-          setDocDraft={setDocDraft}
-          linkSharePointDocument={linkSharePointDocument}
-          linkingDocument={linkingDocument}
-          uploadFile={uploadFile}
-          setUploadFile={setUploadFile}
-          uploadTitle={uploadTitle}
-          setUploadTitle={setUploadTitle}
-          uploadNotes={uploadNotes}
-          setUploadNotes={setUploadNotes}
-          uploadDocument={uploadDocument}
-          uploadingDocument={uploadingDocument}
-          meetingsList={meetings}
-        />
-      </div>
-
-      <div className="mobile-only">
-        <MobileShell
-          meetings={meetings}
-          grouped={grouped}
-          selectedItem={selectedItem}
-          draggedItemId={draggedItemId}
-          setDraggedItemId={setDraggedItemId}
-          reorderItems={reorderItems}
-          stats={stats}
-          error={error}
-          notice={notice}
-          loadData={loadData}
-          saving={saving}
-          draft={draft}
-          setDraft={setDraft}
-          createItem={createItem}
-          creating={creating}
-          updateSelectedItem={updateSelectedItem}
-          docDraft={docDraft}
-          setDocDraft={setDocDraft}
-          linkSharePointDocument={linkSharePointDocument}
-          linkingDocument={linkingDocument}
-          uploadFile={uploadFile}
-          setUploadFile={setUploadFile}
-          uploadTitle={uploadTitle}
-          setUploadTitle={setUploadTitle}
-          uploadNotes={uploadNotes}
-          setUploadNotes={setUploadNotes}
-          uploadDocument={uploadDocument}
-          uploadingDocument={uploadingDocument}
-          meetingsList={meetings}
-          mobileTab={mobileTab}
-          setMobileTab={setMobileTab}
-          onSelectItem={handleSelectItem}
-        />
-      </div>
-    </>
-  );
-}
-
-function DesktopShell(props: any) {
-  const {
-    meetings, grouped, selectedItem, selectedItemId, setSelectedItemId, draggedItemId, setDraggedItemId, reorderItems, stats, error, notice,
-    loadData, saving, draft, setDraft, createItem, creating, updateSelectedItem,
-    docDraft, setDocDraft, linkSharePointDocument, linkingDocument,
-    uploadFile, setUploadFile, uploadTitle, setUploadTitle, uploadNotes, setUploadNotes,
-    uploadDocument, uploadingDocument, meetingsList,
-  } = props;
-
-  return (
-    <div className="app-shell desktop-shell">
-      <aside className="sidebar panelish">
-        <Brand title="Mission board" />
-        <StatsGrid stats={stats} />
-        <MeetingsPanel meetings={meetings} />
-        <QuickAddPanel draft={draft} setDraft={setDraft} meetings={meetingsList} createItem={createItem} creating={creating} />
-      </aside>
-
-      <main className="main-panel panelish">
-        <header className="topbar">
-          <div>
-            <div className="eyebrow">Overview</div>
-            <h2>Board to-dos and agenda pipeline</h2>
+      <header className="app-header-wrap">
+        <div className="app-header panelish">
+          <button
+            type="button"
+            className="menu-button"
+            aria-label="Open module menu"
+            aria-expanded={isDrawerOpen}
+            aria-controls="module-drawer"
+            onClick={() => setIsDrawerOpen(true)}
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          <div className="app-header-title">
+            <span className="eyebrow">Module</span>
+            <h2>
+              {activeModule === 'agenda'
+                ? 'Agenda'
+                : activeModule === 'homeowners'
+                  ? 'Homeowners'
+                  : activeModule === 'parking-permits'
+                    ? 'Parking Permits'
+                  : 'Board Members'}
+            </h2>
           </div>
-          <div className="topbar-note">Responsive split preview · desktop mode</div>
-        </header>
-        {error && <div className="error-banner">{error}</div>}
-        {notice && <div className="notice-banner">{notice}</div>}
-        <section className="lane-grid four-up">
-          <Lane title="Next meeting" laneKey="nextMeeting" items={grouped.nextMeeting} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-          <Lane title="Board to-dos" laneKey="todos" items={grouped.todos} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-          <Lane title="Future" laneKey="future" items={grouped.future} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-          <Lane title="Completed" laneKey="completed" items={grouped.completed} onSelect={setSelectedItemId} selectedItemId={selectedItemId} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-        </section>
-      </main>
-
-      <aside className="detail-panel panelish">
-        <ItemDetail
-          selectedItem={selectedItem}
-          loadData={loadData}
-          saving={saving}
-          updateSelectedItem={updateSelectedItem}
-          meetings={meetingsList}
-          docDraft={docDraft}
-          setDocDraft={setDocDraft}
-          linkSharePointDocument={linkSharePointDocument}
-          linkingDocument={linkingDocument}
-          uploadFile={uploadFile}
-          setUploadFile={setUploadFile}
-          uploadTitle={uploadTitle}
-          setUploadTitle={setUploadTitle}
-          uploadNotes={uploadNotes}
-          setUploadNotes={setUploadNotes}
-          uploadDocument={uploadDocument}
-          uploadingDocument={uploadingDocument}
-          compact={false}
-        />
-      </aside>
-    </div>
-  );
-}
-
-function MobileShell(props: any) {
-  const {
-    meetings, grouped, selectedItem, draggedItemId, setDraggedItemId, reorderItems, stats, error, notice, loadData, saving, draft, setDraft,
-    createItem, creating, updateSelectedItem, docDraft, setDocDraft, linkSharePointDocument,
-    linkingDocument, uploadFile, setUploadFile, uploadTitle, setUploadTitle, uploadNotes,
-    setUploadNotes, uploadDocument, uploadingDocument, meetingsList, mobileTab, setMobileTab, onSelectItem,
-  } = props;
-
-  return (
-    <div className="app-shell mobile-shell">
-      <header className="mobile-topbar panelish">
-        <Brand title="Mobile preview" compact />
-        <div className="topbar-actions">
-          <button className="ghost-button" onClick={() => setMobileTab('board')}>Board</button>
-          <button className="ghost-button" onClick={() => setMobileTab('item')} disabled={!selectedItem}>Item</button>
-          <button className="primary-button" onClick={() => setMobileTab('add')}>Add</button>
+          <div id="module-header-actions" className="app-header-actions" />
         </div>
       </header>
+      <div
+        className={`drawer-backdrop ${isDrawerOpen ? 'open' : ''}`}
+        onClick={() => setIsDrawerOpen(false)}
+        aria-hidden={!isDrawerOpen}
+      >
+        <aside
+          id="module-drawer"
+          className={`module-drawer panelish ${isDrawerOpen ? 'open' : ''}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="drawer-header">
+            <span className="section-heading">Modules</span>
+            <button
+              type="button"
+              className="drawer-close"
+              aria-label="Close module menu"
+              onClick={() => setIsDrawerOpen(false)}
+            >
+              Close
+            </button>
+          </div>
+          <nav className="drawer-nav">
+            <button
+              type="button"
+              className={`drawer-module-button ${activeModule === 'agenda' ? 'active' : ''}`}
+              onClick={() => handleModuleChange('agenda')}
+            >
+              Agenda
+            </button>
+            <button
+              type="button"
+              className={`drawer-module-button ${activeModule === 'homeowners' ? 'active' : ''}`}
+              onClick={() => handleModuleChange('homeowners')}
+            >
+              Homeowners
+            </button>
+            <button
+              type="button"
+              className={`drawer-module-button ${activeModule === 'board-members' ? 'active' : ''}`}
+              onClick={() => handleModuleChange('board-members')}
+            >
+              Board Members
+            </button>
+            <button
+              type="button"
+              className={`drawer-module-button ${activeModule === 'parking-permits' ? 'active' : ''}`}
+              onClick={() => handleModuleChange('parking-permits')}
+            >
+              Parking Permits
+            </button>
+          </nav>
+        </aside>
+      </div>
 
-      {error && <div className="error-banner">{error}</div>}
-      {notice && <div className="notice-banner">{notice}</div>}
-      <StatsGrid stats={stats} compact />
+      {activeModule === 'agenda' && (
+        <>
+          <div className="desktop-only">
+            <DesktopAgendaShell
+              meetings={meetings}
+              grouped={grouped}
+              selectedItem={selectedItem}
+              selectedItemId={selectedItemId}
+              setSelectedItemId={setSelectedItemId}
+              draggedItemId={draggedItemId}
+              setDraggedItemId={setDraggedItemId}
+              reorderItems={reorderItems}
+              stats={stats}
+              error={error}
+              notice={notice}
+              loadData={loadData}
+              saving={saving}
+              draft={draft}
+              setDraft={setDraft}
+              createItem={createItem}
+              creating={creating}
+              updateSelectedItem={updateSelectedItem}
+              uploadFile={uploadFile}
+              setUploadFile={setUploadFile}
+              uploadTitle={uploadTitle}
+              setUploadTitle={setUploadTitle}
+              uploadNotes={uploadNotes}
+              setUploadNotes={setUploadNotes}
+              uploadDocument={uploadDocument}
+              uploadingDocument={uploadingDocument}
+              removeDocument={removeDocument}
+              removingDocumentId={removingDocumentId}
+            />
+          </div>
 
-      {mobileTab === 'board' && (
-        <main className="mobile-page">
-          <MeetingsPanel meetings={meetings} compact />
-          <MobileLane title="Next meeting" laneKey="nextMeeting" items={grouped.nextMeeting} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-          <MobileLane title="Board to-dos" laneKey="todos" items={grouped.todos} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-          <MobileLane title="Future" laneKey="future" items={grouped.future} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-          <MobileLane title="Completed" laneKey="completed" items={grouped.completed} onSelect={onSelectItem} draggedItemId={draggedItemId} setDraggedItemId={setDraggedItemId} reorderItems={reorderItems} />
-        </main>
+          <div className="mobile-only">
+            <MobileAgendaShell
+              meetings={meetings}
+              grouped={grouped}
+              selectedItem={selectedItem}
+              draggedItemId={draggedItemId}
+              setDraggedItemId={setDraggedItemId}
+              reorderItems={reorderItems}
+              stats={stats}
+              error={error}
+              notice={notice}
+              loadData={loadData}
+              saving={saving}
+              draft={draft}
+              setDraft={setDraft}
+              createItem={createItem}
+              creating={creating}
+              updateSelectedItem={updateSelectedItem}
+              uploadFile={uploadFile}
+              setUploadFile={setUploadFile}
+              uploadTitle={uploadTitle}
+              setUploadTitle={setUploadTitle}
+              uploadNotes={uploadNotes}
+              setUploadNotes={setUploadNotes}
+              uploadDocument={uploadDocument}
+              uploadingDocument={uploadingDocument}
+              removeDocument={removeDocument}
+              removingDocumentId={removingDocumentId}
+              mobileTab={mobileTab}
+              setMobileTab={setMobileTab}
+              onSelectItem={handleSelectItem}
+            />
+          </div>
+        </>
       )}
 
-      {mobileTab === 'item' && (
-        <main className="mobile-page">
-          <ItemDetail
-            selectedItem={selectedItem}
-            loadData={loadData}
-            saving={saving}
-            updateSelectedItem={updateSelectedItem}
-            meetings={meetingsList}
-            docDraft={docDraft}
-            setDocDraft={setDocDraft}
-            linkSharePointDocument={linkSharePointDocument}
-            linkingDocument={linkingDocument}
-            uploadFile={uploadFile}
-            setUploadFile={setUploadFile}
-            uploadTitle={uploadTitle}
-            setUploadTitle={setUploadTitle}
-            uploadNotes={uploadNotes}
-            setUploadNotes={setUploadNotes}
-            uploadDocument={uploadDocument}
-            uploadingDocument={uploadingDocument}
-            compact
+      {activeModule === 'homeowners' && (
+        <main className="homeowners-page">
+          <HomeownersView
+            items={homeowners}
+            selectedId={selectedHomeownerId}
+            onSelect={setSelectedHomeownerId}
+            detail={selectedHomeowner}
+            listLoading={homeownersLoading}
+            detailLoading={homeownersDetailLoading}
+            saving={homeownersSaving}
+            query={homeownerQuery}
+            onQueryChange={setHomeownerQuery}
+            onRefresh={() => loadHomeowners(homeownerQuery)}
+            onSave={saveHomeowner}
+            onUploadPermitDocument={uploadPermitDocument}
+            onRemovePermitDocument={removePermitDocument}
+            error={homeownersError}
           />
         </main>
       )}
 
-      {mobileTab === 'add' && (
-        <main className="mobile-page">
-          <QuickAddPanel draft={draft} setDraft={setDraft} meetings={meetingsList} createItem={createItem} creating={creating} compact />
+      {activeModule === 'parking-permits' && (
+        <main className="homeowners-page">
+          <ParkingPermitsView
+            permits={parkingPermits}
+            selectedPermitId={selectedParkingPermitId}
+            selectedPermit={selectedParkingPermit}
+            loading={parkingPermitsLoading}
+            detailLoading={parkingPermitDetailLoading}
+            saving={parkingPermitSaving}
+            deleting={parkingPermitDeleting}
+            years={parkingPermitYears}
+            selectedYear={selectedPermitYear}
+            onYearChange={setSelectedPermitYear}
+            homeowners={homeowners}
+            onRefresh={() => loadParkingPermits(selectedPermitYear)}
+            onSelectPermit={setSelectedParkingPermitId}
+            onCreatePermit={createParkingPermit}
+            onSavePermit={saveParkingPermit}
+            onDeletePermit={deleteParkingPermit}
+            onUploadPermitDocument={uploadPermitDocument}
+            onRemovePermitDocument={removePermitDocument}
+            error={parkingPermitsError}
+          />
         </main>
       )}
 
-      <nav className="mobile-bottom-nav panelish">
-        <button className={`nav-button ${mobileTab === 'board' ? 'active' : ''}`} onClick={() => setMobileTab('board')}>Board</button>
-        <button className={`nav-button ${mobileTab === 'item' ? 'active' : ''}`} onClick={() => setMobileTab('item')} disabled={!selectedItem}>Item</button>
-        <button className={`nav-button ${mobileTab === 'add' ? 'active' : ''}`} onClick={() => setMobileTab('add')}>Add</button>
-      </nav>
-    </div>
-  );
-}
-
-function Brand({ title, compact = false }: { title: string; compact?: boolean }) {
-  return (
-    <div className={`brand ${compact ? 'compact' : ''}`}>
-      <div className="brand-mark">L</div>
-      <div>
-        <div className="eyebrow">HOA agenda</div>
-        <h1>{title}</h1>
-      </div>
-    </div>
-  );
-}
-
-function StatsGrid({ stats, compact = false }: { stats: { label: string; value: number }[]; compact?: boolean }) {
-  return (
-    <section className={`stats-grid ${compact ? 'compact' : ''}`}>
-      {stats.map((stat) => (
-        <div className="stat-card panelish" key={stat.label}>
-          <div className="stat-label">{stat.label}</div>
-          <div className={`stat-value ${compact ? 'compact' : ''}`}>{stat.value}</div>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-function MeetingsPanel({ meetings, compact = false }: { meetings: Meeting[]; compact?: boolean }) {
-  return (
-    <section className={`sidebar-section ${compact ? 'mobile-section panelish' : ''}`}>
-      <div className="section-heading">Upcoming meetings</div>
-      <div className={`meeting-stack ${compact ? 'compact-stack' : ''}`}>
-        {meetings.map((meeting) => (
-          <div className={`meeting-card ${compact ? 'compact-card' : ''}`} key={meeting.id}>
-            <div className="meeting-title">{meeting.title}</div>
-            <div className="meeting-meta">{meeting.meeting_date}</div>
-            {!compact && meeting.cadence_note && <div className="meeting-meta muted">{meeting.cadence_note}</div>}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function QuickAddPanel({ draft, setDraft, meetings, createItem, creating, compact = false }: any) {
-  return (
-    <section className={`${compact ? 'mobile-section panelish' : 'sidebar-section form-section'}`}>
-      <div className="section-heading">Quick add</div>
-      <form className="quick-form" onSubmit={createItem}>
-        <input value={draft.title} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, title: e.target.value }))} placeholder="New item title" />
-        <textarea value={draft.description} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, description: e.target.value }))} placeholder="Short description" rows={3} />
-        <div className="form-grid two-up">
-          <select value={draft.kind} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, kind: e.target.value }))}>
-            {kindOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
-          <select value={draft.priority} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, priority: e.target.value }))}>
-            {priorityOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-          </select>
-        </div>
-        <div className="form-grid two-up">
-          <select value={draft.status} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, status: e.target.value }))}>
-            {statusOptions.map((option) => <option key={option} value={option}>{statusLabel[option]}</option>)}
-          </select>
-          <select value={draft.meeting_intent} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, meeting_intent: e.target.value }))}>
-            {meetingIntentOptions.map((option) => <option key={option} value={option}>{meetingIntentLabel[option]}</option>)}
-          </select>
-        </div>
-        <select value={draft.target_meeting_id} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, target_meeting_id: e.target.value }))}>
-          <option value="">No meeting assigned</option>
-          {meetings.map((meeting: Meeting) => <option key={meeting.id} value={meeting.id}>{meeting.title}</option>)}
-        </select>
-        <input value={draft.owner} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, owner: e.target.value }))} placeholder="Owner" />
-        <textarea value={draft.next_action} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, next_action: e.target.value }))} placeholder="Next action" rows={2} />
-        <textarea value={draft.notesText} onChange={(e) => setDraft((d: DraftItem) => ({ ...d, notesText: e.target.value }))} placeholder="Notes, one per line" rows={3} />
-        <button className="primary-button full-width" type="submit" disabled={creating}>{creating ? 'Creating…' : 'Create item'}</button>
-      </form>
-    </section>
-  );
-}
-
-function ItemDetail(props: any) {
-  const {
-    selectedItem, loadData, saving, updateSelectedItem, meetings,
-    docDraft, setDocDraft, linkSharePointDocument, linkingDocument,
-    uploadFile, setUploadFile, uploadTitle, setUploadTitle, uploadNotes, setUploadNotes,
-    uploadDocument, uploadingDocument, compact,
-  } = props;
-
-  if (!selectedItem) return <div className={`empty-detail ${compact ? 'panelish mobile-section' : ''}`}>Select an item to see details.</div>;
-
-  return (
-    <>
-      <section className={`${compact ? 'mobile-section panelish' : ''}`}>
-        <div className="detail-header-row">
-          <div>
-            <div className="eyebrow">Item detail</div>
-            <h2 className={compact ? 'mobile-item-title' : ''}>{selectedItem.title}</h2>
-          </div>
-          <button className="ghost-button" onClick={() => void loadData()} disabled={saving}>{saving ? 'Saving…' : 'Refresh'}</button>
-        </div>
-        <div className="chip-row">
-          <span className={`chip chip-status status-${selectedItem.status}`}>{statusLabel[selectedItem.status] || selectedItem.status}</span>
-          <span className="chip">{selectedItem.kind === 'task' ? 'Board to-do' : 'Agenda candidate'}</span>
-          {selectedItem.priority && <span className="chip">{selectedItem.priority}</span>}
-        </div>
-        {compact && (
-          <div className="quick-actions-grid">
-            <button className="ghost-button" onClick={() => void updateSelectedItem({ status: 'ready' }, 'Status set to ready')}>Mark ready</button>
-            <button className="ghost-button" onClick={() => void updateSelectedItem({ meeting_intent: 'future' }, 'Meeting intent set to future')}>Move future</button>
-            <button className="ghost-button" onClick={() => void updateSelectedItem({ status: 'completed' }, 'Status set to completed')}>Complete</button>
-          </div>
-        )}
-      </section>
-
-      <EditableField label="Description" value={selectedItem.description || ''} multiline onSave={(value) => updateSelectedItem({ description: value || null }, 'Description updated')} saving={saving} compact={compact} />
-      <EditableField label="Next action" value={selectedItem.next_action || ''} multiline onSave={(value) => updateSelectedItem({ next_action: value || null }, 'Next action updated')} saving={saving} compact={compact} />
-      <EditableField label="Notes" value={selectedItem.notes.join('\n')} multiline onSave={(value) => updateSelectedItem({ notes: value.split('\n').map((line: string) => line.trim()).filter(Boolean) }, 'Notes updated')} saving={saving} compact={compact} />
-
-      <section className={`${compact ? 'mobile-section panelish' : 'detail-block form-block'}`}>
-        <div className="detail-label">Workflow</div>
-        <div className="form-grid two-up">
-          <select value={selectedItem.status} onChange={(e) => void updateSelectedItem({ status: e.target.value }, `Status set to ${e.target.value}`)}>
-            {statusOptions.map((option) => <option key={option} value={option}>{statusLabel[option]}</option>)}
-          </select>
-          <select value={selectedItem.meeting_intent || 'unscheduled'} onChange={(e) => void updateSelectedItem({ meeting_intent: e.target.value }, `Meeting intent set to ${e.target.value}`)}>
-            {meetingIntentOptions.map((option) => <option key={option} value={option}>{meetingIntentLabel[option]}</option>)}
-          </select>
-        </div>
-        <select value={selectedItem.target_meeting_id || ''} onChange={(e) => void updateSelectedItem({ target_meeting_id: e.target.value || null }, 'Target meeting updated')}>
-          <option value="">No meeting assigned</option>
-          {meetings.map((meeting: Meeting) => <option key={meeting.id} value={meeting.id}>{meeting.title}</option>)}
-        </select>
-      </section>
-
-      <section className={`${compact ? 'mobile-section panelish' : 'detail-block form-block'}`}>
-        <div className="detail-label">Documents</div>
-        <div className="document-list">
-          {(selectedItem.documents || []).length ? (
-            (selectedItem.documents || []).map((doc: DocumentRecord) => (
-              <a className="document-card" key={doc.id} href={doc.sharepoint_web_url || '#'} target="_blank" rel="noreferrer">
-                <div className="document-title">{doc.title}</div>
-                <div className="muted small-text">{doc.sharepoint_path || doc.source_type}</div>
-                {doc.notes && <div className="muted small-text">{doc.notes}</div>}
-              </a>
-            ))
-          ) : (
-            <div className="empty-lane">No linked documents yet.</div>
-          )}
-        </div>
-        <input value={docDraft.title} onChange={(e) => setDocDraft((d: any) => ({ ...d, title: e.target.value }))} placeholder="Document title" />
-        <input value={docDraft.webUrl} onChange={(e) => setDocDraft((d: any) => ({ ...d, webUrl: e.target.value }))} placeholder="SharePoint document URL" />
-        <input value={docDraft.path} onChange={(e) => setDocDraft((d: any) => ({ ...d, path: e.target.value }))} placeholder="SharePoint path / folder" />
-        <textarea value={docDraft.notes} onChange={(e) => setDocDraft((d: any) => ({ ...d, notes: e.target.value }))} rows={2} placeholder="Document notes" />
-        <div className="field-actions">
-          <button className="ghost-button" type="button" onClick={() => setDocDraft({ title: '', webUrl: '', path: '', notes: '' })}>Clear</button>
-          <button className="primary-button" type="button" onClick={() => void linkSharePointDocument()} disabled={linkingDocument}>{linkingDocument ? 'Linking…' : 'Link SharePoint document'}</button>
-        </div>
-        <div className="detail-label">Upload file to SharePoint</div>
-        <input type="file" onChange={(e) => setUploadFile(e.target.files?.[0] || null)} />
-        {uploadFile && <div className="muted small-text">Selected file: {uploadFile.name}</div>}
-        <input value={uploadTitle} onChange={(e) => setUploadTitle(e.target.value)} placeholder="Optional display title" />
-        <textarea value={uploadNotes} onChange={(e) => setUploadNotes(e.target.value)} rows={2} placeholder="Upload notes" />
-        <div className="field-actions">
-          <button className="ghost-button" type="button" onClick={() => { setUploadFile(null); setUploadTitle(''); setUploadNotes(''); }}>Clear upload</button>
-          <button className="primary-button" type="button" onClick={() => void uploadDocument()} disabled={uploadingDocument || !uploadFile}>{uploadingDocument ? 'Uploading…' : 'Upload to SharePoint'}</button>
-        </div>
-        {!compact && <div className="detail-footer muted">Updated {new Date(selectedItem.updated_at).toLocaleString()}</div>}
-      </section>
+      {activeModule === 'board-members' && (
+        <main className="homeowners-page">
+          <BoardMembersView
+            members={boardMembers}
+            loading={boardMembersLoading}
+            error={boardMembersError}
+            onRefresh={loadBoardMembers}
+          />
+        </main>
+      )}
     </>
-  );
-}
-
-function EditableField({ label, value, onSave, multiline = false, saving, compact = false }: {
-  label: string;
-  value: string;
-  onSave: (value: string) => Promise<void> | void;
-  multiline?: boolean;
-  saving: boolean;
-  compact?: boolean;
-}) {
-  const [draft, setDraft] = useState(value);
-  useEffect(() => setDraft(value), [value]);
-
-  return (
-    <section className={`${compact ? 'mobile-section panelish' : 'detail-block form-block'}`}>
-      <div className="detail-label">{label}</div>
-      {multiline ? <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={label.includes('Notes') ? 5 : 3} /> : <input value={draft} onChange={(e) => setDraft(e.target.value)} />}
-      <div className="field-actions">
-        <button className="ghost-button" type="button" onClick={() => setDraft(value)} disabled={saving}>Reset</button>
-        <button className="primary-button" type="button" onClick={() => void onSave(draft)} disabled={saving}>Save</button>
-      </div>
-    </section>
-  );
-}
-
-function Lane({
-  title,
-  laneKey,
-  items,
-  onSelect,
-  selectedItemId,
-  draggedItemId,
-  setDraggedItemId,
-  reorderItems,
-}: {
-  title: string;
-  laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed';
-  items: AgendaItem[];
-  onSelect: (id: string) => void;
-  selectedItemId: string | null;
-  draggedItemId: string | null;
-  setDraggedItemId: (id: string | null) => void;
-  reorderItems: (laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed', draggedId: string, targetId: string) => Promise<void>;
-}) {
-  return (
-    <section className="lane panelish">
-      <div className="lane-header">
-        <h3>{title}</h3>
-        <span>{items.length}</span>
-      </div>
-      <div className="lane-stack">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            className={`issue-card ${selectedItemId === item.id ? 'active' : ''} ${draggedItemId === item.id ? 'dragging' : ''}`}
-            draggable
-            onDragStart={() => setDraggedItemId(item.id)}
-            onDragEnd={() => setDraggedItemId(null)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={async (e) => {
-              e.preventDefault();
-              if (draggedItemId) await reorderItems(laneKey, draggedItemId, item.id);
-              setDraggedItemId(null);
-            }}
-            onClick={() => onSelect(item.id)}
-          >
-            <div className="drag-handle-row">
-              <span className="drag-grip">⋮⋮</span>
-              <div className="issue-meta-row">
-                <span className={`dot status-${item.status}`} />
-                <span className="issue-id">{item.id}</span>
-              </div>
-            </div>
-            <div className="issue-title">{item.title}</div>
-            <div className="issue-subtitle">{item.description || 'No description yet.'}</div>
-            <div className="issue-chip-row">
-              <span className="mini-chip">{statusLabel[item.status] || item.status}</span>
-              {item.priority && <span className="mini-chip">{item.priority}</span>}
-              {item.target_meeting_title && <span className="mini-chip">{item.target_meeting_title.replace(' board meeting', '')}</span>}
-            </div>
-          </button>
-        ))}
-        {!items.length && <div className="empty-lane">Nothing here yet.</div>}
-      </div>
-    </section>
-  );
-}
-
-function MobileLane({
-  title,
-  laneKey,
-  items,
-  onSelect,
-  draggedItemId,
-  setDraggedItemId,
-  reorderItems,
-}: {
-  title: string;
-  laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed';
-  items: AgendaItem[];
-  onSelect: (id: string) => void;
-  draggedItemId: string | null;
-  setDraggedItemId: (id: string | null) => void;
-  reorderItems: (laneKey: 'nextMeeting' | 'todos' | 'future' | 'completed', draggedId: string, targetId: string) => Promise<void>;
-}) {
-  return (
-    <section className="mobile-section panelish">
-      <div className="lane-header">
-        <h3>{title}</h3>
-        <span>{items.length}</span>
-      </div>
-      <div className="lane-stack mobile-list-stack">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            className={`issue-card mobile-issue-card ${draggedItemId === item.id ? 'dragging' : ''}`}
-            draggable
-            onDragStart={() => setDraggedItemId(item.id)}
-            onDragEnd={() => setDraggedItemId(null)}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={async (e) => {
-              e.preventDefault();
-              if (draggedItemId) await reorderItems(laneKey, draggedItemId, item.id);
-              setDraggedItemId(null);
-            }}
-            onClick={() => onSelect(item.id)}
-          >
-            <div className="drag-handle-row">
-              <span className="drag-grip">⋮⋮</span>
-              <div className="issue-meta-row">
-                <span className={`dot status-${item.status}`} />
-                <span className="issue-id">{item.id}</span>
-              </div>
-            </div>
-            <div className="issue-title">{item.title}</div>
-            <div className="issue-chip-row">
-              <span className="mini-chip">{statusLabel[item.status] || item.status}</span>
-              {item.target_meeting_title && <span className="mini-chip">{item.target_meeting_title.replace(' board meeting', '')}</span>}
-            </div>
-          </button>
-        ))}
-        {!items.length && <div className="empty-lane">Nothing here yet.</div>}
-      </div>
-    </section>
   );
 }
 
