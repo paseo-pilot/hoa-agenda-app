@@ -661,7 +661,8 @@ function App() {
     const todoIds = laneKey === 'todos' ? laneIds : grouped.todos.map((item) => item.id);
     const futureIds = laneKey === 'future' ? laneIds : grouped.future.map((item) => item.id);
     const completedIds = laneKey === 'completed' ? laneIds : grouped.completed.map((item) => item.id);
-    const orderedIds = [...nextMeetingIds, ...todoIds, ...futureIds, ...completedIds];
+    const orderedIdsWithDuplicates = [...nextMeetingIds, ...todoIds, ...futureIds, ...completedIds];
+    const orderedIds = Array.from(new Set(orderedIdsWithDuplicates));
 
     const sortMap = new Map(orderedIds.map((id, index) => [id, index + 1]));
     setItems((prev) => [...prev]
